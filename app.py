@@ -14,9 +14,10 @@ STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
+# Vi definerer de forventede kolonnenavne, som vi efter normalisering skal have i mapping- og stock-filerne.
 
-# Mapping-filens krævede kolonner (nøjagtigt, inklusiv de dobbelte krølleparenteser)
-REQUIRED_MAPPING_COLS = [
+# Mapping-filens krævede kolonner (brug originalt format – vi normaliserer efterfølgende)
+REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
     "{{Product country of origin}}",
@@ -37,17 +38,17 @@ REQUIRED_MAPPING_COLS = [
     "{{Product Lifestyle4}}"
 ]
 
-# Stock-filens krævede kolonner – opdateret til de fundne kolonner
-REQUIRED_STOCK_COLS = [
-    "{{productcode}}",
+# Stock-filens krævede kolonner (brug originalt format – vi normaliserer efterfølgende)
+REQUIRED_STOCK_COLS_ORIG = [
+    "{{productcode}}",  # vi antager, at stock-filen har dette i små bogstaver
     "variantfamily",
     "variantcommercialname",
     "rts",
     "mto"
 ]
 
-# For stock-filens opslag – opdateret til de fundne kolonnenavne
-STOCK_CODE_COL = "{{productcode}}"
+# Vi definerer konstanter til at tilgå stock-data
+STOCK_CODE_COL = "{{productcode}}"   # Dette skal normaliseres til det samme format som i stock_df
 STOCK_GROUP_COL = "variantfamily"
 STOCK_VALUE_COL = "variantcommercialname"
 STOCK_RTS_FILTER_COL = "rts"
@@ -55,7 +56,7 @@ STOCK_MTO_FILTER_COL = "mto"
 
 # --- Placeholders til erstatning i templaten ---
 # Tekstfelter: mapping fra placeholder til foruddefineret label
-TEXT_PLACEHOLDERS = {
+TEXT_PLACEHOLDERS_ORIG = {
     "{{Product name}}": "Product Name:",
     "{{Product code}}": "Product Code:",
     "{{Product country of origin}}": "Country of origin:",
@@ -70,13 +71,13 @@ TEXT_PLACEHOLDERS = {
 }
 
 # Hyperlink felter: nøglen er placeholder, og værdien er display-tekst
-HYPERLINK_PLACEHOLDERS = {
+HYPERLINK_PLACEHOLDERS_ORIG = {
     "{{Product Fact Sheet link}}": "Download Product Fact Sheet",
     "{{Product configurator link}}": "Click to configure product"
 }
 
 # Billed placeholders: der indsættes billeder fra URL
-IMAGE_PLACEHOLDERS = [
+IMAGE_PLACEHOLDERS_ORIG = [
     "{{Product Packshot1}}",
     "{{Product Lifestyle1}}",
     "{{Product Lifestyle2}}",
@@ -87,27 +88,29 @@ IMAGE_PLACEHOLDERS = [
 # --- Hjælpefunktioner ---
 
 def normalize_text(s):
-    """Fjerner alle mellemrum og konverterer til små bogstaver for at lette sammenligninger."""
-    return re.sub(r"\s+", "", str(s)).lower()
+    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
-    """Normaliserer et kolonnenavn: fjerner alle mellemrum (inkl. ikke-brydende) og konverterer til små bogstaver."""
-    return re.sub(r"\s+", "", str(col).replace("\u00A0", " ")).lower()
+    """Normaliserer et kolonnenavn: fjerner mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    return normalize_text(col)
 
-def find_mapping_row(item_no, mapping_df):
+# Efter indlæsning vil vi erstatte kolonnenavnene med deres normaliserede versioner.
+
+def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
-    Finder den række i mapping_df, hvor kolonnen '{{Product code}}' matcher item_no.
+    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher item_no.
     Prøver først et eksakt match; hvis ikke og item_no indeholder '-', matches delstrengen før '-'.
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
-        code = row.get("{{Product code}}", "")
+        code = row.get(mapping_prod_key, "")
         if normalize_text(code) == norm_item:
             return row
     if "-" in str(item_no):
         partial = normalize_text(item_no.split("-")[0])
         for idx, row in mapping_df.iterrows():
-            code = row.get("{{Product code}}", "")
+            code = row.get(mapping_prod_key, "")
             if normalize_text(code).startswith(partial):
                 return row
     return None
@@ -116,7 +119,11 @@ def process_stock_rts(stock_df, product_code):
     """Behandler RTS-data: Filtrér stock_df for matchende produktkode og ikke-tomme RTS-celler,
     gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med linjeskift."""
     norm_code = normalize_text(product_code)
-    filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+    try:
+        filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+    except KeyError as e:
+        st.error(f"KeyError i process_stock_rts: {e}")
+        return ""
     if filtered.empty:
         return ""
     filtered = filtered[filtered[STOCK_RTS_FILTER_COL].notna() & (filtered[STOCK_RTS_FILTER_COL] != "")]
@@ -136,7 +143,11 @@ def process_stock_mto(stock_df, product_code):
     """Behandler MTO-data: Filtrér stock_df for matchende produktkode og ikke-tomme MTO-celler,
     gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med komma og mellemrum."""
     norm_code = normalize_text(product_code)
-    filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+    try:
+        filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+    except KeyError as e:
+        st.error(f"KeyError i process_stock_mto: {e}")
+        return ""
     if filtered.empty:
         return ""
     filtered = filtered[filtered[STOCK_MTO_FILTER_COL].notna() & (filtered[STOCK_MTO_FILTER_COL] != "")]
@@ -210,8 +221,10 @@ def replace_image_placeholders(slide, image_values):
     for shape in slide.shapes:
         if shape.has_text_frame:
             tekst = shape.text
-            for ph in IMAGE_PLACEHOLDERS:
-                if ph in tekst:
+            for ph in IMAGE_PLACEHOLDERS_ORIG:
+                # Vi normaliserer ph for at sikre, at match sker uafhængigt af mellemrum
+                norm_ph = normalize_text(ph)
+                if norm_ph in normalize_text(tekst):
                     url = image_values.get(ph, "")
                     if url:
                         img_stream = fetch_and_process_image(url)
@@ -221,7 +234,7 @@ def replace_image_placeholders(slide, image_values):
                             width = shape.width
                             height = shape.height
                             slide.shapes.add_picture(img_stream, left, top, width=width, height=height)
-                            shape.text = ""  # Fjern placeholder-teksten, så billedet vises
+                            shape.text = ""  # Fjern placeholder-teksten
                     break
 
 # --- Main Streamlit App ---
@@ -250,36 +263,37 @@ def main():
 
     st.write("Brugerfil indlæst succesfuldt!")
 
-    # Indlæs og rens mapping-filen
+    # Indlæs og normalisér mapping-filen
     try:
         mapping_df = pd.read_excel(MAPPING_FILE_PATH)
-        mapping_df.columns = mapping_df.columns.map(lambda col: col.strip())
+        mapping_df.columns = [normalize_col(col) for col in mapping_df.columns]
     except Exception as e:
         st.error(f"Fejl ved læsning af mapping-fil: {e}")
         return
 
-    normalized_mapping_cols = [normalize_col(col) for col in mapping_df.columns]
-    normalized_required_mapping_cols = [normalize_col(col) for col in REQUIRED_MAPPING_COLS]
-    missing_mapping_cols = [req for req in normalized_required_mapping_cols if req not in normalized_mapping_cols]
+    normalized_required_mapping_cols = [normalize_col(col) for col in REQUIRED_MAPPING_COLS_ORIG]
+    missing_mapping_cols = [req for req in normalized_required_mapping_cols if req not in mapping_df.columns]
     if missing_mapping_cols:
-        st.error(f"Mapping-filen mangler følgende kolonner (efter normalisering): {missing_mapping_cols}. Fundne kolonner: {normalized_mapping_cols}")
+        st.error(f"Mapping-filen mangler følgende kolonner (efter normalisering): {missing_mapping_cols}. Fundne kolonner: {mapping_df.columns.tolist()}")
         return
 
     st.write("Mapping-fil indlæst succesfuldt!")
 
-    # Indlæs og rens stock-filen
+    # Definér den normaliserede nøgle for mapping-filens produktkode
+    MAPPING_PRODUCT_CODE_KEY = normalize_col("{{Product code}}")
+
+    # Indlæs og normalisér stock-filen
     try:
         stock_df = pd.read_excel(STOCK_FILE_PATH)
-        stock_df.columns = stock_df.columns.map(lambda col: col.strip())
+        stock_df.columns = [normalize_col(col) for col in stock_df.columns]
     except Exception as e:
         st.error(f"Fejl ved læsning af stock-fil: {e}")
         return
 
-    normalized_stock_cols = [normalize_col(col) for col in stock_df.columns]
-    normalized_required_stock_cols = [normalize_col(col) for col in REQUIRED_STOCK_COLS]
-    missing_stock_cols = [req for req in normalized_required_stock_cols if req not in normalized_stock_cols]
+    normalized_required_stock_cols = [normalize_col(col) for col in REQUIRED_STOCK_COLS_ORIG]
+    missing_stock_cols = [req for req in normalized_required_stock_cols if req not in stock_df.columns]
     if missing_stock_cols:
-        st.error(f"Stock-filen mangler følgende kolonner (efter normalisering): {missing_stock_cols}. Fundne kolonner: {normalized_stock_cols}")
+        st.error(f"Stock-filen mangler følgende kolonner (efter normalisering): {missing_stock_cols}. Fundne kolonner: {stock_df.columns.tolist()}")
         return
 
     st.write("Stock-fil indlæst succesfuldt!")
@@ -304,23 +318,24 @@ def main():
         item_no = product["Item no"]
         slide = duplicate_slide(prs, template_slide)
 
-        # Find match i mapping-filen baseret på '{{Product code}}'
-        mapping_row = find_mapping_row(item_no, mapping_df)
+        # Find match i mapping-filen baseret på den normaliserede produktkode
+        mapping_row = find_mapping_row(item_no, mapping_df, MAPPING_PRODUCT_CODE_KEY)
         if mapping_row is None:
             st.warning(f"Ingen match fundet i mapping-fil for Item no: {item_no}")
             continue
 
-        # Opret dictionary for tekst placeholders
+        # Opret dictionary for tekst placeholders – brug de originale nøgler, da de forventes i templaten
         placeholder_texts = {}
-        for ph, label in TEXT_PLACEHOLDERS.items():
-            value = mapping_row.get(ph, "")
+        for ph, label in TEXT_PLACEHOLDERS_ORIG.items():
+            norm_ph = normalize_col(ph)
+            value = mapping_row.get(norm_ph, "")
             if pd.isna(value):
                 value = ""
             placeholder_texts[ph] = f"{label}\n{value}"
 
-        # Hent produktkode (brug nøglen med de dobbelte krølleparenteser)
-        product_code = mapping_row.get("{{Product code}}", "")
-        # Behandl stock data for RTS og MTO
+        # Hent produktkode fra mapping_row
+        product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
+        # Behandl stock-data for RTS og MTO
         rts_text = process_stock_rts(stock_df, product_code)
         mto_text = process_stock_mto(stock_df, product_code)
         placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
@@ -330,16 +345,18 @@ def main():
         replace_text_placeholders(slide, placeholder_texts)
 
         hyperlink_vals = {}
-        for ph, display_text in HYPERLINK_PLACEHOLDERS.items():
-            url = mapping_row.get(ph, "")
+        for ph, display_text in HYPERLINK_PLACEHOLDERS_ORIG.items():
+            norm_ph = normalize_col(ph)
+            url = mapping_row.get(norm_ph, "")
             if pd.isna(url):
                 url = ""
             hyperlink_vals[ph] = (display_text, url)
         replace_hyperlink_placeholders(slide, hyperlink_vals)
 
         image_vals = {}
-        for ph in IMAGE_PLACEHOLDERS:
-            url = mapping_row.get(ph, "")
+        for ph in IMAGE_PLACEHOLDERS_ORIG:
+            norm_ph = normalize_col(ph)
+            url = mapping_row.get(norm_ph, "")
             if pd.isna(url):
                 url = ""
             image_vals[ph] = url
