@@ -189,20 +189,27 @@ def duplicate_slide(prs, slide):
         new_slide.shapes._spTree.append(deepcopy(shape._element))
     return new_slide
 
+import re
+
 def replace_text_placeholders(slide, placeholder_values):
     """
-    Erstatter tekstplaceholders i en slide ved at gennemgå hvert run og
-    foretage string-udskiftning. På den måde bevares den eksisterende formatering
-    (skriftfarve, størrelse, osv.).
+    Erstatter tekstplaceholders i en slide ved hjælp af regex, så eventuelle ekstra mellemrum inden for klammerne ignoreres.
+    Dette bevarer den eksisterende formatering (skriftfarve, størrelse, osv.) for hvert run.
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
+                    original_text = run.text
                     for placeholder, new_text in placeholder_values.items():
-                        if placeholder in run.text:
-                            # Udskift placeholder med ny tekst og tilføj et linjeskift før indholdet
-                            run.text = run.text.replace(placeholder, "\n" + new_text)
+                        # Fjern klammerne og trim for at få nøglen
+                        key = placeholder.strip("{}").strip()
+                        # Opret et regex-mønster, der matcher '{{', efterfulgt af eventuelle mellemrum, nøglen, og så eventuelle mellemrum og '}}'
+                        pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
+                        # Erstat forekomsten med new_text
+                        original_text = re.sub(pattern, new_text, original_text)
+                    run.text = original_text
+
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
