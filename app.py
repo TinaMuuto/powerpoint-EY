@@ -207,6 +207,7 @@ def replace_text_placeholders(slide, placeholder_values):
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
+    import re
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
@@ -263,6 +264,9 @@ def main():
 
     try:
         user_df = pd.read_excel(uploaded_file)
+        # Hvis din brugerfil indeholder header som første række, 
+        # fjern denne række for at behandle kun data:
+        user_df = user_df.iloc[1:]
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
         return
@@ -371,7 +375,6 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-        # Opdater progress bar
         progress_bar.progress((index + 1) / total_products)
 
     ppt_io = io.BytesIO()
