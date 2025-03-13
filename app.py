@@ -8,7 +8,7 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster eventuelt, hvis filerne ligger i en undermappe (fx "data/")
+# Filstier – juster efter behov (fx "data/mapping-file.xlsx" osv.)
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
@@ -37,23 +37,23 @@ REQUIRED_MAPPING_COLS = [
     "{{Product Lifestyle4}}"
 ]
 
-# Stock-filens krævede kolonner
+# Stock-filens krævede kolonner – opdateret til de fundne kolonner
 REQUIRED_STOCK_COLS = [
-    "{{Product code}}",
-    "Group",
-    "Value",
-    "RTS",
-    "MTO"
+    "{{productcode}}",
+    "variantfamily",
+    "variantcommercialname",
+    "rts",
+    "mto"
 ]
 
-# For stock-filens opslag
-STOCK_CODE_COL = "{{Product code}}"
-STOCK_GROUP_COL = "Group"
-STOCK_VALUE_COL = "Value"
-STOCK_RTS_FILTER_COL = "RTS"
-STOCK_MTO_FILTER_COL = "MTO"
+# For stock-filens opslag – opdateret til de fundne kolonnenavne
+STOCK_CODE_COL = "{{productcode}}"
+STOCK_GROUP_COL = "variantfamily"
+STOCK_VALUE_COL = "variantcommercialname"
+STOCK_RTS_FILTER_COL = "rts"
+STOCK_MTO_FILTER_COL = "mto"
 
-# --- Placeholders til erstatning i template ---
+# --- Placeholders til erstatning i templaten ---
 # Tekstfelter: mapping fra placeholder til foruddefineret label
 TEXT_PLACEHOLDERS = {
     "{{Product name}}": "Product Name:",
@@ -114,7 +114,7 @@ def find_mapping_row(item_no, mapping_df):
 
 def process_stock_rts(stock_df, product_code):
     """Behandler RTS-data: Filtrér stock_df for matchende produktkode og ikke-tomme RTS-celler,
-    gruppering på 'Group' og samler værdier fra 'Value' med linjeskift."""
+    gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med linjeskift."""
     norm_code = normalize_text(product_code)
     filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
     if filtered.empty:
@@ -134,7 +134,7 @@ def process_stock_rts(stock_df, product_code):
 
 def process_stock_mto(stock_df, product_code):
     """Behandler MTO-data: Filtrér stock_df for matchende produktkode og ikke-tomme MTO-celler,
-    gruppering på 'Group' og samler værdier fra 'Value' med komma og mellemrum."""
+    gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med komma og mellemrum."""
     norm_code = normalize_text(product_code)
     filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
     if filtered.empty:
@@ -253,17 +253,14 @@ def main():
     # Indlæs og rens mapping-filen
     try:
         mapping_df = pd.read_excel(MAPPING_FILE_PATH)
-        # Fjern evt. ekstra mellemrum fra kolonnenavne
         mapping_df.columns = mapping_df.columns.map(lambda col: col.strip())
     except Exception as e:
         st.error(f"Fejl ved læsning af mapping-fil: {e}")
         return
 
-    # Normaliser kolonnenavnene for mapping-filen
     normalized_mapping_cols = [normalize_col(col) for col in mapping_df.columns]
     normalized_required_mapping_cols = [normalize_col(col) for col in REQUIRED_MAPPING_COLS]
     missing_mapping_cols = [req for req in normalized_required_mapping_cols if req not in normalized_mapping_cols]
-
     if missing_mapping_cols:
         st.error(f"Mapping-filen mangler følgende kolonner (efter normalisering): {missing_mapping_cols}. Fundne kolonner: {normalized_mapping_cols}")
         return
@@ -281,7 +278,6 @@ def main():
     normalized_stock_cols = [normalize_col(col) for col in stock_df.columns]
     normalized_required_stock_cols = [normalize_col(col) for col in REQUIRED_STOCK_COLS]
     missing_stock_cols = [req for req in normalized_required_stock_cols if req not in normalized_stock_cols]
-
     if missing_stock_cols:
         st.error(f"Stock-filen mangler følgende kolonner (efter normalisering): {missing_stock_cols}. Fundne kolonner: {normalized_stock_cols}")
         return
