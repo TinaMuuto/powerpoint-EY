@@ -134,19 +134,24 @@ def process_stock_mto(stock_df, product_code):
             result_lines.append(f"{group_text}\n{values_text}")
     return "\n".join(result_lines)
 
-def fetch_and_process_image(url):
+def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
     Henter et billede fra en URL. Hvis billedet er TIFF, konverteres det til JPEG.
+    Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
     Returnerer et BytesIO-objekt med billedet.
     """
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
+            # Konverter TIFF til RGB, hvis nødvendigt
             if img.format.lower() == "tiff":
                 img = img.convert("RGB")
+            # Reducer billedets størrelse, hvis det er for stort
+            img.thumbnail(max_size, Image.ANTIALIAS)
+            # Gem billedet med komprimering
             img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format="JPEG")
+            img.save(img_byte_arr, format="JPEG", quality=quality, optimize=True)
             img_byte_arr.seek(0)
             return img_byte_arr
     except Exception as e:
@@ -186,7 +191,7 @@ def replace_image_placeholders(slide, image_values):
     """
     Erstat billedplaceholders med billeder fra URL.
     image_values: dict med nøgle (f.eks. "{{Product Packshot1}}") og værdi som billede-URL.
-    For hvert match findes placeholderen i en shape – billedet hentes, konverteres evt. og indsættes i samme position.
+    For hvert match findes placeholderen i en shape – billedet hentes, komprimeres og indsættes i samme position.
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
