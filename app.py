@@ -14,9 +14,7 @@ STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
-# Vi definerer de forventede kolonnenavne, som vi efter normalisering skal have i mapping- og stock-filerne.
-
-# Mapping-filens krævede kolonner (brug originalt format – vi normaliserer efterfølgende)
+# Vi definerer de forventede kolonnenavne (originale) for mapping- og stock-filerne.
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -38,17 +36,16 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product Lifestyle4}}"
 ]
 
-# Stock-filens krævede kolonner (brug originalt format – vi normaliserer efterfølgende)
 REQUIRED_STOCK_COLS_ORIG = [
-    "{{productcode}}",  # vi antager, at stock-filen har dette i små bogstaver
+    "{{productcode}}",  # i stock-filen er dette med små bogstaver
     "variantfamily",
     "variantcommercialname",
     "rts",
     "mto"
 ]
 
-# Vi definerer konstanter til at tilgå stock-data
-STOCK_CODE_COL = "{{productcode}}"   # Dette skal normaliseres til det samme format som i stock_df
+# Konstant til at tilgå stock-data
+STOCK_CODE_COL = "{{productcode}}"
 STOCK_GROUP_COL = "variantfamily"
 STOCK_VALUE_COL = "variantcommercialname"
 STOCK_RTS_FILTER_COL = "rts"
@@ -92,10 +89,8 @@ def normalize_text(s):
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
-    """Normaliserer et kolonnenavn: fjerner mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    """Normaliserer et kolonnenavn: fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
     return normalize_text(col)
-
-# Efter indlæsning vil vi erstatte kolonnenavnene med deres normaliserede versioner.
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
@@ -173,11 +168,8 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
-            # Hvis billedet har gennemsigtighed, konverter til RGB
-            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-                img = img.convert("RGB")
-            # Hvis det er en TIFF, konverter også til RGB
-            elif img.format and img.format.lower() == "tiff":
+            # Hvis billedet har gennemsigtighed eller er TIFF, konverter til RGB
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info) or (img.format and img.format.lower() == "tiff"):
                 img = img.convert("RGB")
             img.thumbnail(max_size, Image.LANCZOS)
             img_byte_arr = io.BytesIO()
@@ -187,7 +179,6 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     except Exception as e:
         st.error(f"Fejl ved hentning af billede fra {url}: {e}")
     return None
-
 
 def duplicate_slide(prs, slide):
     """Duplicer en slide ved at kopiere dens elementer – svarende til Ctrl+D."""
@@ -199,13 +190,19 @@ def duplicate_slide(prs, slide):
     return new_slide
 
 def replace_text_placeholders(slide, placeholder_values):
-    """Erstatter tekstplaceholders i en slide med de leverede værdier."""
+    """
+    Erstatter tekstplaceholders i en slide ved at gennemgå hvert run og
+    foretage string-udskiftning. På den måde bevares den eksisterende formatering
+    (skriftfarve, størrelse, osv.).
+    """
     for shape in slide.shapes:
         if shape.has_text_frame:
-            tekst = shape.text
-            for placeholder, ny_tekst in placeholder_values.items():
-                if placeholder in tekst:
-                    shape.text = ny_tekst
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    for placeholder, new_text in placeholder_values.items():
+                        if placeholder in run.text:
+                            # Udskift placeholder med ny tekst og tilføj et linjeskift før indholdet
+                            run.text = run.text.replace(placeholder, "\n" + new_text)
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
@@ -215,7 +212,7 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
                 for run in paragraph.runs:
                     for placeholder, (display_text, url) in hyperlink_values.items():
                         if placeholder in run.text:
-                            run.text = display_text
+                            run.text = run.text.replace(placeholder, display_text)
                             try:
                                 run.hyperlink.address = url
                             except Exception as e:
@@ -227,7 +224,6 @@ def replace_image_placeholders(slide, image_values):
         if shape.has_text_frame:
             tekst = shape.text
             for ph in IMAGE_PLACEHOLDERS_ORIG:
-                # Vi normaliserer ph for at sikre, at match sker uafhængigt af mellemrum
                 norm_ph = normalize_text(ph)
                 if norm_ph in normalize_text(tekst):
                     url = image_values.get(ph, "")
@@ -239,7 +235,7 @@ def replace_image_placeholders(slide, image_values):
                             width = shape.width
                             height = shape.height
                             slide.shapes.add_picture(img_stream, left, top, width=width, height=height)
-                            shape.text = ""  # Fjern placeholder-teksten
+                            shape.text = ""  # Fjern placeholder-teksten, så billedet vises
                     break
 
 # --- Main Streamlit App ---
