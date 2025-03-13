@@ -165,17 +165,21 @@ def process_stock_mto(stock_df, product_code):
 
 def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
-    Henter billede fra en URL. Hvis billedet er i TIFF-format, konverteres det til JPEG.
-    Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
+    Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
+    konverteres det til RGB. Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
     Returnerer et BytesIO-objekt med billedet.
     """
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
-            if img.format.lower() == "tiff":
+            # Hvis billedet har gennemsigtighed, konverter til RGB
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
                 img = img.convert("RGB")
-            img.thumbnail(max_size, Image.LANCZOS)  # Ændret fra ANTIALIAS til LANCZOS
+            # Hvis det er en TIFF, konverter også til RGB
+            elif img.format and img.format.lower() == "tiff":
+                img = img.convert("RGB")
+            img.thumbnail(max_size, Image.LANCZOS)
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format="JPEG", quality=quality, optimize=True)
             img_byte_arr.seek(0)
