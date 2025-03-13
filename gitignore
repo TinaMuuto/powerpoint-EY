@@ -1,0 +1,26 @@
+# Python cache filer
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtuelle miljøer
+venv/
+ENV/
+env/
+.venv/
+
+# Build- og distributionsmapper
+build/
+dist/
+*.egg-info/
+
+# IDE-specifikke filer
+.vscode/
+.idea/
+
+# Operativsystemfiler
+.DS_Store
+Thumbs.db
+
+# Logfiler
+*.log
