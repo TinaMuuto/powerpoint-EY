@@ -168,7 +168,6 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
-            # Hvis billedet har gennemsigtighed eller er TIFF, konverter til RGB
             if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info) or (img.format and img.format.lower() == "tiff"):
                 img = img.convert("RGB")
             img.thumbnail(max_size, Image.LANCZOS)
@@ -189,27 +188,22 @@ def duplicate_slide(prs, slide):
         new_slide.shapes._spTree.append(deepcopy(shape._element))
     return new_slide
 
-import re
-
 def replace_text_placeholders(slide, placeholder_values):
     """
     Erstatter tekstplaceholders i en slide ved hjælp af regex, så eventuelle ekstra mellemrum inden for klammerne ignoreres.
-    Dette bevarer den eksisterende formatering (skriftfarve, størrelse, osv.) for hvert run.
+    Bevarer eksisterende formatering (skriftfarve, størrelse osv.) ved at erstatte i hvert run.
     """
+    import re
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
                     original_text = run.text
                     for placeholder, new_text in placeholder_values.items():
-                        # Fjern klammerne og trim for at få nøglen
                         key = placeholder.strip("{}").strip()
-                        # Opret et regex-mønster, der matcher '{{', efterfulgt af eventuelle mellemrum, nøglen, og så eventuelle mellemrum og '}}'
                         pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
-                        # Erstat forekomsten med new_text
                         original_text = re.sub(pattern, new_text, original_text)
                     run.text = original_text
-
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
@@ -218,17 +212,18 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
                     for placeholder, (display_text, url) in hyperlink_values.items():
-                        if placeholder in run.text:
-                            run.text = run.text.replace(placeholder, display_text)
+                        key = placeholder.strip("{}").strip()
+                        pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
+                        if re.search(pattern, run.text):
+                            run.text = re.sub(pattern, display_text, run.text)
                             try:
                                 run.hyperlink.address = url
                             except Exception as e:
                                 st.warning(f"Hyperlink for {placeholder} kunne ikke indsættes: {e}")
 
 def replace_image_placeholders(slide, image_values):
-    """
-    Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
-    Billedet skaleres, så det passer inden for placeholder-feltet uden at ændre aspect ratio.
+    """Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
+    Billedet skaleres, så det bevarer sit aspect ratio.
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -240,23 +235,19 @@ def replace_image_placeholders(slide, image_values):
                     if url:
                         img_stream = fetch_and_process_image(url)
                         if img_stream:
-                            # Åbn billedet med PIL for at få dets oprindelige dimensioner
                             img = Image.open(img_stream)
                             original_width, original_height = img.size
                             target_width = shape.width
                             target_height = shape.height
-                            # Beregn skaleringsfaktor så billedet passer inden for feltet
                             scale = min(target_width / original_width, target_height / original_height)
                             new_width = int(original_width * scale)
                             new_height = int(original_height * scale)
-                            # Gem billedet igen til en ny BytesIO-strøm
                             new_img_stream = io.BytesIO()
                             img.save(new_img_stream, format="JPEG")
                             new_img_stream.seek(0)
                             slide.shapes.add_picture(new_img_stream, shape.left, shape.top, width=new_width, height=new_height)
-                            shape.text = ""  # Fjern placeholder-teksten
+                            shape.text = ""
                     break
-
 
 # --- Main Streamlit App ---
 
@@ -299,8 +290,6 @@ def main():
         return
 
     st.write("Mapping-fil indlæst succesfuldt!")
-
-    # Definér den normaliserede nøgle for mapping-filens produktkode
     MAPPING_PRODUCT_CODE_KEY = normalize_col("{{Product code}}")
 
     # Indlæs og normalisér stock-filen
@@ -334,18 +323,20 @@ def main():
     template_slide = prs.slides[0]
     prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
 
+    # Opsæt progress bar
+    total_products = len(user_df)
+    progress_bar = st.progress(0)
+
     # For hvert produkt i brugerfilen
     for index, product in user_df.iterrows():
         item_no = product["Item no"]
         slide = duplicate_slide(prs, template_slide)
 
-        # Find match i mapping-filen baseret på den normaliserede produktkode
         mapping_row = find_mapping_row(item_no, mapping_df, MAPPING_PRODUCT_CODE_KEY)
         if mapping_row is None:
             st.warning(f"Ingen match fundet i mapping-fil for Item no: {item_no}")
             continue
 
-        # Opret dictionary for tekst placeholders – brug de originale nøgler, da de forventes i templaten
         placeholder_texts = {}
         for ph, label in TEXT_PLACEHOLDERS_ORIG.items():
             norm_ph = normalize_col(ph)
@@ -354,15 +345,12 @@ def main():
                 value = ""
             placeholder_texts[ph] = f"{label}\n{value}"
 
-        # Hent produktkode fra mapping_row
         product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
-        # Behandl stock-data for RTS og MTO
         rts_text = process_stock_rts(stock_df, product_code)
         mto_text = process_stock_mto(stock_df, product_code)
         placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
         placeholder_texts["{{Product MTO}}"] = f"Avilable for made to order:\n{mto_text}"
 
-        # Erstat tekst, hyperlinks og billeder i sliden
         replace_text_placeholders(slide, placeholder_texts)
 
         hyperlink_vals = {}
@@ -383,7 +371,9 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-    # Gem den genererede præsentation i en BytesIO-strøm og gør den klar til download
+        # Opdater progress bar
+        progress_bar.progress((index + 1) / total_products)
+
     ppt_io = io.BytesIO()
     try:
         prs.save(ppt_io)
