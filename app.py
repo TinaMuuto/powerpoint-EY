@@ -36,7 +36,7 @@ REQUIRED_MAPPING_COLS_ORIG = [
 ]
 
 REQUIRED_STOCK_COLS_ORIG = [
-    "{{productcode}}",  # I stock-filen er dette med små bogstaver
+    "{{productcode}}",  # i stock-filen er dette med små bogstaver
     "variantfamily",
     "variantcommercialname",
     "rts",
@@ -79,9 +79,10 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
+
 def normalize_text(s):
     """
-    Fjerner alle mellemrum (inklusiv ikke-brydende mellemrum) og konverterer til små bogstaver.
+    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
     Dette sikrer, at eventuelle ekstra mellemrum ignoreres.
     """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
@@ -109,9 +110,8 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     return None
 
 def process_stock_rts(stock_df, product_code):
-    """Behandler RTS-data ved at normalisere produktkode og filtrere stock_df.
-    Gruppér efter 'variantfamily' og saml værdier fra 'variantcommercialname' med linjeskift.
-    """
+    """Behandler RTS-data: Filtrér stock_df for matchende produktkode og ikke-tomme RTS-celler,
+    gruppering på 'variantfamily' og saml værdier fra 'variantcommercialname' med linjeskift."""
     norm_code = normalize_text(product_code)
     try:
         filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -134,9 +134,8 @@ def process_stock_rts(stock_df, product_code):
     return "\n".join(result_lines)
 
 def process_stock_mto(stock_df, product_code):
-    """Behandler MTO-data ved at normalisere produktkode og filtrere stock_df.
-    Gruppér efter 'variantfamily' og saml værdier fra 'variantcommercialname' med komma og mellemrum.
-    """
+    """Behandler MTO-data: Filtrér stock_df for matchende produktkode og ikke-tomme MTO-celler,
+    gruppering på 'variantfamily' og saml værdier fra 'variantcommercialname' med komma og mellemrum."""
     norm_code = normalize_text(product_code)
     try:
         filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -162,6 +161,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
     Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
     konverteres det til RGB. Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
+    Returnerer et BytesIO-objekt med billedet.
     """
     try:
         response = requests.get(url, timeout=10)
@@ -190,7 +190,7 @@ def duplicate_slide(prs, slide):
 def replace_text_placeholders(slide, placeholder_values):
     """
     Erstatter tekstplaceholders i en slide ved hjælp af regex, så eventuelle ekstra mellemrum inden for klammerne ignoreres.
-    Eksisterende formatering (skriftfarve, størrelse osv.) bevares ved at ændre i hvert run.
+    Bevarer eksisterende formatering (skriftfarve, størrelse osv.) ved at ændre i hvert run.
     """
     import re
     for shape in slide.shapes:
@@ -263,7 +263,7 @@ def main():
 
     try:
         user_df = pd.read_excel(uploaded_file)
-        # Fjern første række, hvis den indeholder headerinformation (hvis nødvendigt)
+        # Fjern den første række, hvis den indeholder headerinformation, så kun data behandles
         user_df = user_df.iloc[1:]
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
@@ -373,7 +373,8 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-        progress_bar.progress(int((index + 1) / total_products * 100))
+        # Opdater progress bar med et helt tal mellem 0 og 100
+        progress_bar.progress(min(int((index + 1) / total_products * 100), 100))
 
     ppt_io = io.BytesIO()
     try:
@@ -390,3 +391,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+ 
