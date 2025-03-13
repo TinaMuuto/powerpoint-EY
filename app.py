@@ -14,13 +14,13 @@ STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # Konstanter for stock-filens kolonner – tilpas disse hvis dine headers er anderledes
-STOCK_CODE_COL = "Product code"     # Kolonne B: produktkode
-STOCK_GROUP_COL = "Group"           # Kolonne F: gruppereference
-STOCK_VALUE_COL = "Value"           # Kolonne G: værdi, som skal indsættes
-STOCK_RTS_FILTER_COL = "RTS"        # Kolonne H: filter for RTS – skal ikke være tom
-STOCK_MTO_FILTER_COL = "MTO"        # Kolonne I: filter for MTO – skal ikke være tom
+STOCK_CODE_COL = "Product code"     # Skal matche stock-filen
+STOCK_GROUP_COL = "Group"           
+STOCK_VALUE_COL = "Value"           
+STOCK_RTS_FILTER_COL = "RTS"        
+STOCK_MTO_FILTER_COL = "MTO"        
 
-# Definer placeholder mappings for tekstfelter – nøglerne skal matche det, der står i template (inkl. {{ }})
+# Definer placeholder mappings for tekstfelter – nøglerne skal matche de kolonneoverskrifter, der findes i mapping-filen og template
 TEXT_PLACEHOLDERS = {
     "{{Product name}}": "Product Name:",
     "{{Product code}}": "Product Code:",
@@ -30,7 +30,7 @@ TEXT_PLACEHOLDERS = {
     "{{Product length}}": "Length:",
     "{{Product depth}}": "Depth:",
     "{{Product seat height}}": "Seat Height:",
-    "{{Product  diameter}}": "Diameter:",
+    "{{Product diameter}}": "Diameter:",
     "{{CertificateName}}": "Test & certificates for the product:",
     "{{Product Consumption COM}}": "Consumption information for COM:",
 }
@@ -57,7 +57,7 @@ def duplicate_slide(prs, slide):
     """
     slide_layout = slide.slide_layout
     new_slide = prs.slides.add_slide(slide_layout)
-    # Ryd de eksisterende shapes (som standard kommer en ny slide med foruddefinerede objekter)
+    # Ryd de eksisterende shapes (en ny slide kommer normalt med standardobjekter)
     new_slide.shapes._spTree.clear()
     # Kopier alle shapes fra template-sliden til den nye slide
     for shape in slide.shapes:
@@ -65,34 +65,34 @@ def duplicate_slide(prs, slide):
     return new_slide
 
 def normalize_text(s):
-    """Fjerner mellemrum og konverterer til lower case for at lette sammenligninger."""
+    """Fjerner mellemrum og konverterer til små bogstaver for at lette sammenligninger."""
     return re.sub(r"\s+", "", str(s)).lower()
 
 def find_mapping_row(item_no, mapping_df):
     """
-    Find den række i mapping-fil hvor 'Product code' matcher item_no.
+    Find den række i mapping-filen, hvor kolonnen '{{Product code}}' matcher item_no.
     Der tages højde for case, mellemrum og evt. delvist match, hvis der findes en '-' i item_no.
     """
     norm_item = normalize_text(item_no)
-    # Først prøves et eksakt match
+    # Forsøg først et eksakt match (brug hele nøgle-strengen)
     for idx, row in mapping_df.iterrows():
-        code = row.get("Product code", "")
+        code = row.get("{{Product code}}", "")
         if normalize_text(code) == norm_item:
             return row
-    # Hvis der ikke findes et eksakt match, og item_no indeholder '-' så prøv at matche med delstrengen før '-'
+    # Hvis ikke eksakt match, og hvis item_no indeholder '-', så match på delstreng før '-'
     if "-" in str(item_no):
         partial = normalize_text(item_no.split("-")[0])
         for idx, row in mapping_df.iterrows():
-            code = row.get("Product code", "")
+            code = row.get("{{Product code}}", "")
             if normalize_text(code).startswith(partial):
                 return row
     return None
 
 def process_stock_rts(stock_df, product_code):
     """
-    Henter og grupperer data til feltet {{Product RTS}}.
-    Filtrerer stock_df, så der kun tages rækker med matchende produktkode og ikke-tomme celler i kolonne H.
-    Herefter grupperes der på kolonne F, og for hver gruppe laves der en tekststreng med gruppenavn og tilhørende værdier (kolonne G) adskilt med linjeskift.
+    Henter og grupperer data til feltet {{Product RTS}} fra stock-filen.
+    Filtrerer stock_df for matchende produktkode og ikke-tomme celler i RTS-kolonnen.
+    Gruppér derefter på 'Group' og returnér en streng med gruppenavn og tilhørende værdier (fra 'Value').
     """
     norm_code = normalize_text(product_code)
     filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -113,9 +113,9 @@ def process_stock_rts(stock_df, product_code):
 
 def process_stock_mto(stock_df, product_code):
     """
-    Henter og grupperer data til feltet {{Product MTO}}.
-    Filtrerer stock_df med ikke-tomme celler i kolonne I, grupperer på kolonne F,
-    og returnerer for hver gruppe en streng med gruppenavn og tilhørende værdier (kolonne G) sammenkædet med komma og mellemrum.
+    Henter og grupperer data til feltet {{Product MTO}} fra stock-filen.
+    Filtrerer stock_df for matchende produktkode og ikke-tomme celler i MTO-kolonnen.
+    Gruppér på 'Group' og returnér en streng med gruppenavn og tilhørende værdier (fra 'Value') sammenkædet med komma og mellemrum.
     """
     norm_code = normalize_text(product_code)
     filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -144,12 +144,9 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
-            # Konverter TIFF til RGB, hvis nødvendigt
             if img.format.lower() == "tiff":
                 img = img.convert("RGB")
-            # Reducer billedets størrelse, hvis det er for stort
             img.thumbnail(max_size, Image.ANTIALIAS)
-            # Gem billedet med komprimering
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format="JPEG", quality=quality, optimize=True)
             img_byte_arr.seek(0)
@@ -161,7 +158,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
 def replace_text_placeholders(slide, placeholder_values):
     """
     Gennemløber alle shapes i en slide og erstatter tekst, hvis placeholderen findes.
-    placeholder_values: dict med nøglen (f.eks. "{{Product name}}") og værdi, der skal indsættes (inkl. label og ny linje).
+    placeholder_values: dictionary med nøglen (f.eks. "{{Product name}}") og værdi, der skal indsættes (inkl. label og ny linje).
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -173,7 +170,7 @@ def replace_text_placeholders(slide, placeholder_values):
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """
     Erstat hyperlink placeholders.
-    hyperlink_values: dict med nøglen (f.eks. "{{Product Fact Sheet link}}") og værdi som et tuple (display_text, url).
+    hyperlink_values: dictionary med nøglen (f.eks. "{{Product Fact Sheet link}}") og værdi som et tuple (display_text, url).
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -190,8 +187,8 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
 def replace_image_placeholders(slide, image_values):
     """
     Erstat billedplaceholders med billeder fra URL.
-    image_values: dict med nøgle (f.eks. "{{Product Packshot1}}") og værdi som billede-URL.
-    For hvert match findes placeholderen i en shape – billedet hentes, komprimeres og indsættes i samme position.
+    image_values: dictionary med nøgle (f.eks. "{{Product Packshot1}}") og værdi som billede-URL.
+    For hvert match hentes billedet, komprimeres og indsættes i den angivne shape.
     """
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -207,8 +204,7 @@ def replace_image_placeholders(slide, image_values):
                             width = shape.width
                             height = shape.height
                             slide.shapes.add_picture(img_stream, left, top, width=width, height=height)
-                            # Ryd placeholder-teksten, så billedet ikke overlapper
-                            shape.text = ""
+                            shape.text = ""  # Fjern placeholder-teksten
                     break
 
 def main():
@@ -266,23 +262,22 @@ def main():
             item_no = product["Item no"]
             slide = duplicate_slide(prs, template_slide)
             
-            # Find match i mapping-filen ud fra Item no
+            # Find match i mapping-filen baseret på Item no (bruger mapping-kolonnen med krølleparenteser)
             mapping_row = find_mapping_row(item_no, mapping_df)
             if mapping_row is None:
                 st.warning(f"Ingen match fundet i mapping-fil for Item no: {item_no}")
                 continue
             
-            # For tekstfelter: Hent værdien fra mapping-filen baseret på nøgle (fjerner {{ og }})
+            # Hent tekstværdier direkte med placeholder-nøglerne
             placeholder_texts = {}
             for ph, label in TEXT_PLACEHOLDERS.items():
-                col_name = ph.replace("{{", "").replace("}}", "").strip()
-                value = mapping_row.get(col_name, "")
+                value = mapping_row.get(ph, "")
                 if pd.isna(value):
                     value = ""
                 placeholder_texts[ph] = f"{label}\n{value}"
             
-            # Behandl de beregnede felter fra stock-filen (RTS og MTO)
-            product_code = mapping_row.get("Product code", "")
+            # Hent produktkoden fra mapping-filen (brug den nøjagtige nøgle)
+            product_code = mapping_row.get("{{Product code}}", "")
             rts_text = process_stock_rts(stock_df, product_code)
             mto_text = process_stock_mto(stock_df, product_code)
             placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
@@ -291,11 +286,10 @@ def main():
             # Erstat tekst placeholders i sliden
             replace_text_placeholders(slide, placeholder_texts)
             
-            # Hyperlink felter – hent URL fra mapping-filen og indsæt display tekst
+            # Hyperlink felter – hent URL fra mapping-filen med de fulde nøgler
             hyperlink_vals = {}
             for ph, display_text in HYPERLINK_PLACEHOLDERS.items():
-                col_name = ph.replace("{{", "").replace("}}", "").strip()
-                url = mapping_row.get(col_name, "")
+                url = mapping_row.get(ph, "")
                 if pd.isna(url):
                     url = ""
                 hyperlink_vals[ph] = (display_text, url)
@@ -304,8 +298,7 @@ def main():
             # Billedfelter – hent URL og indsæt billedet i den angivne shape
             image_vals = {}
             for ph in IMAGE_PLACEHOLDERS:
-                col_name = ph.replace("{{", "").replace("}}", "").strip()
-                url = mapping_row.get(col_name, "")
+                url = mapping_row.get(ph, "")
                 if pd.isna(url):
                     url = ""
                 image_vals[ph] = url
