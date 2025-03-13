@@ -15,7 +15,7 @@ TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
 
-# Mapping-filens krævede kolonner (nøjagtig, inklusiv de dobbelte krølleparenteser)
+# Mapping-filens krævede kolonner (nøjagtigt, inklusiv de dobbelte krølleparenteser)
 REQUIRED_MAPPING_COLS = [
     "{{Product name}}",
     "{{Product code}}",
@@ -101,7 +101,7 @@ def find_mapping_row(item_no, mapping_df):
         code = row.get("{{Product code}}", "")
         if normalize_text(code) == norm_item:
             return row
-    # Hvis der ikke findes et eksakt match, og item_no indeholder '-', så match delstrengen før '-'
+    # Hvis ikke eksakt match, og item_no indeholder '-', så match delstrengen før '-'
     if "-" in str(item_no):
         partial = normalize_text(item_no.split("-")[0])
         for idx, row in mapping_df.iterrows():
@@ -248,9 +248,10 @@ def main():
 
     st.write("Brugerfil indlæst succesfuldt!")
 
-    # Indlæs og valider mapping-filen
+    # Indlæs og rens mapping-filen
     try:
         mapping_df = pd.read_excel(MAPPING_FILE_PATH)
+        mapping_df.columns = mapping_df.columns.str.strip()  # Fjern evt. ekstra mellemrum
     except Exception as e:
         st.error(f"Fejl ved læsning af mapping-fil: {e}")
         return
@@ -262,9 +263,10 @@ def main():
 
     st.write("Mapping-fil indlæst succesfuldt!")
 
-    # Indlæs og valider stock-filen
+    # Indlæs og rens stock-filen
     try:
         stock_df = pd.read_excel(STOCK_FILE_PATH)
+        stock_df.columns = stock_df.columns.str.strip()  # Fjern evt. ekstra mellemrum
     except Exception as e:
         st.error(f"Fejl ved læsning af stock-fil: {e}")
         return
@@ -296,7 +298,7 @@ def main():
         item_no = product["Item no"]
         slide = duplicate_slide(prs, template_slide)
 
-        # Find match i mapping-filen ud fra '{{Product code}}'
+        # Find match i mapping-filen baseret på '{{Product code}}'
         mapping_row = find_mapping_row(item_no, mapping_df)
         if mapping_row is None:
             st.warning(f"Ingen match fundet i mapping-fil for Item no: {item_no}")
