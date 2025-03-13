@@ -14,7 +14,6 @@ STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
-# Vi definerer de forventede kolonnenavne (originale) for mapping- og stock-filerne.
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -37,7 +36,7 @@ REQUIRED_MAPPING_COLS_ORIG = [
 ]
 
 REQUIRED_STOCK_COLS_ORIG = [
-    "{{productcode}}",  # i stock-filen er dette med små bogstaver
+    "{{productcode}}",  # I stock-filen er dette med små bogstaver
     "variantfamily",
     "variantcommercialname",
     "rts",
@@ -52,7 +51,6 @@ STOCK_RTS_FILTER_COL = "rts"
 STOCK_MTO_FILTER_COL = "mto"
 
 # --- Placeholders til erstatning i templaten ---
-# Tekstfelter: mapping fra placeholder til foruddefineret label
 TEXT_PLACEHOLDERS_ORIG = {
     "{{Product name}}": "Product Name:",
     "{{Product code}}": "Product Code:",
@@ -67,13 +65,11 @@ TEXT_PLACEHOLDERS_ORIG = {
     "{{Product Consumption COM}}": "Consumption information for COM:"
 }
 
-# Hyperlink felter: nøglen er placeholder, og værdien er display-tekst
 HYPERLINK_PLACEHOLDERS_ORIG = {
     "{{Product Fact Sheet link}}": "Download Product Fact Sheet",
     "{{Product configurator link}}": "Click to configure product"
 }
 
-# Billed placeholders: der indsættes billeder fra URL
 IMAGE_PLACEHOLDERS_ORIG = [
     "{{Product Packshot1}}",
     "{{Product Lifestyle1}}",
@@ -83,19 +79,21 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
-
 def normalize_text(s):
-    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    """
+    Fjerner alle mellemrum (inklusiv ikke-brydende mellemrum) og konverterer til små bogstaver.
+    Dette sikrer, at eventuelle ekstra mellemrum ignoreres.
+    """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
-    """Normaliserer et kolonnenavn: fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    """Normaliserer et kolonnenavn ved at anvende normalize_text."""
     return normalize_text(col)
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
     Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher item_no.
-    Prøver først et eksakt match; hvis ikke og item_no indeholder '-', matches delstrengen før '-'.
+    Både 'Item no' og mapping-værdien normaliseres, så alle mellemrum ignoreres.
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -111,8 +109,9 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     return None
 
 def process_stock_rts(stock_df, product_code):
-    """Behandler RTS-data: Filtrér stock_df for matchende produktkode og ikke-tomme RTS-celler,
-    gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med linjeskift."""
+    """Behandler RTS-data ved at normalisere produktkode og filtrere stock_df.
+    Gruppér efter 'variantfamily' og saml værdier fra 'variantcommercialname' med linjeskift.
+    """
     norm_code = normalize_text(product_code)
     try:
         filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -135,8 +134,9 @@ def process_stock_rts(stock_df, product_code):
     return "\n".join(result_lines)
 
 def process_stock_mto(stock_df, product_code):
-    """Behandler MTO-data: Filtrér stock_df for matchende produktkode og ikke-tomme MTO-celler,
-    gruppering på 'variantfamily' og samler værdier fra 'variantcommercialname' med komma og mellemrum."""
+    """Behandler MTO-data ved at normalisere produktkode og filtrere stock_df.
+    Gruppér efter 'variantfamily' og saml værdier fra 'variantcommercialname' med komma og mellemrum.
+    """
     norm_code = normalize_text(product_code)
     try:
         filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
@@ -162,7 +162,6 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
     Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
     konverteres det til RGB. Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
-    Returnerer et BytesIO-objekt med billedet.
     """
     try:
         response = requests.get(url, timeout=10)
@@ -191,7 +190,7 @@ def duplicate_slide(prs, slide):
 def replace_text_placeholders(slide, placeholder_values):
     """
     Erstatter tekstplaceholders i en slide ved hjælp af regex, så eventuelle ekstra mellemrum inden for klammerne ignoreres.
-    Bevarer eksisterende formatering (skriftfarve, størrelse osv.) ved at erstatte i hvert run.
+    Eksisterende formatering (skriftfarve, størrelse osv.) bevares ved at ændre i hvert run.
     """
     import re
     for shape in slide.shapes:
@@ -223,7 +222,8 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
                                 st.warning(f"Hyperlink for {placeholder} kunne ikke indsættes: {e}")
 
 def replace_image_placeholders(slide, image_values):
-    """Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
+    """
+    Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
     Billedet skaleres, så det bevarer sit aspect ratio.
     """
     for shape in slide.shapes:
@@ -251,7 +251,6 @@ def replace_image_placeholders(slide, image_values):
                     break
 
 # --- Main Streamlit App ---
-
 def main():
     st.title("PowerPoint Generator App")
     st.write("Upload din brugerfil (Excel) med kolonnerne 'Item no' og 'Product name'")
@@ -264,8 +263,7 @@ def main():
 
     try:
         user_df = pd.read_excel(uploaded_file)
-        # Hvis din brugerfil indeholder header som første række, 
-        # fjern denne række for at behandle kun data:
+        # Fjern første række, hvis den indeholder headerinformation (hvis nødvendigt)
         user_df = user_df.iloc[1:]
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
@@ -375,7 +373,7 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-        progress_bar.progress((index + 1) / total_products)
+        progress_bar.progress(int((index + 1) / total_products * 100))
 
     ppt_io = io.BytesIO()
     try:
