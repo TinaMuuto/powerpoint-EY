@@ -90,18 +90,20 @@ def normalize_text(s):
     """Fjerner alle mellemrum og konverterer til små bogstaver for at lette sammenligninger."""
     return re.sub(r"\s+", "", str(s)).lower()
 
+def normalize_col(col):
+    """Normaliserer et kolonnenavn: fjerner alle mellemrum (inkl. ikke-brydende) og konverterer til små bogstaver."""
+    return re.sub(r"\s+", "", str(col).replace("\u00A0", " ")).lower()
+
 def find_mapping_row(item_no, mapping_df):
     """
     Finder den række i mapping_df, hvor kolonnen '{{Product code}}' matcher item_no.
     Prøver først et eksakt match; hvis ikke og item_no indeholder '-', matches delstrengen før '-'.
     """
     norm_item = normalize_text(item_no)
-    # Prøv eksakt match
     for idx, row in mapping_df.iterrows():
         code = row.get("{{Product code}}", "")
         if normalize_text(code) == norm_item:
             return row
-    # Hvis ikke eksakt match, og item_no indeholder '-', så match delstrengen før '-'
     if "-" in str(item_no):
         partial = normalize_text(item_no.split("-")[0])
         for idx, row in mapping_df.iterrows():
@@ -251,14 +253,19 @@ def main():
     # Indlæs og rens mapping-filen
     try:
         mapping_df = pd.read_excel(MAPPING_FILE_PATH)
-        mapping_df.columns = mapping_df.columns.str.strip()  # Fjern evt. ekstra mellemrum
+        # Fjern evt. ekstra mellemrum fra kolonnenavne
+        mapping_df.columns = mapping_df.columns.map(lambda col: col.strip())
     except Exception as e:
         st.error(f"Fejl ved læsning af mapping-fil: {e}")
         return
 
-    missing_mapping_cols = [col for col in REQUIRED_MAPPING_COLS if col not in mapping_df.columns]
+    # Normaliser kolonnenavnene for mapping-filen
+    normalized_mapping_cols = [normalize_col(col) for col in mapping_df.columns]
+    normalized_required_mapping_cols = [normalize_col(col) for col in REQUIRED_MAPPING_COLS]
+    missing_mapping_cols = [req for req in normalized_required_mapping_cols if req not in normalized_mapping_cols]
+
     if missing_mapping_cols:
-        st.error(f"Mapping-filen mangler følgende kolonner: {missing_mapping_cols}. Fundne kolonner: {list(mapping_df.columns)}")
+        st.error(f"Mapping-filen mangler følgende kolonner (efter normalisering): {missing_mapping_cols}. Fundne kolonner: {normalized_mapping_cols}")
         return
 
     st.write("Mapping-fil indlæst succesfuldt!")
@@ -266,14 +273,17 @@ def main():
     # Indlæs og rens stock-filen
     try:
         stock_df = pd.read_excel(STOCK_FILE_PATH)
-        stock_df.columns = stock_df.columns.str.strip()  # Fjern evt. ekstra mellemrum
+        stock_df.columns = stock_df.columns.map(lambda col: col.strip())
     except Exception as e:
         st.error(f"Fejl ved læsning af stock-fil: {e}")
         return
 
-    missing_stock_cols = [col for col in REQUIRED_STOCK_COLS if col not in stock_df.columns]
+    normalized_stock_cols = [normalize_col(col) for col in stock_df.columns]
+    normalized_required_stock_cols = [normalize_col(col) for col in REQUIRED_STOCK_COLS]
+    missing_stock_cols = [req for req in normalized_required_stock_cols if req not in normalized_stock_cols]
+
     if missing_stock_cols:
-        st.error(f"Stock-filen mangler følgende kolonner: {missing_stock_cols}. Fundne kolonner: {list(stock_df.columns)}")
+        st.error(f"Stock-filen mangler følgende kolonner (efter normalisering): {missing_stock_cols}. Fundne kolonner: {normalized_stock_cols}")
         return
 
     st.write("Stock-fil indlæst succesfuldt!")
