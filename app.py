@@ -175,7 +175,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
             img = Image.open(io.BytesIO(response.content))
             if img.format.lower() == "tiff":
                 img = img.convert("RGB")
-            img.thumbnail(max_size, Image.ANTIALIAS)
+            img.thumbnail(max_size, Image.LANCZOS)  # Ændret fra ANTIALIAS til LANCZOS
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format="JPEG", quality=quality, optimize=True)
             img_byte_arr.seek(0)
@@ -183,6 +183,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     except Exception as e:
         st.error(f"Fejl ved hentning af billede fra {url}: {e}")
     return None
+
 
 def duplicate_slide(prs, slide):
     """Duplicer en slide ved at kopiere dens elementer – svarende til Ctrl+D."""
