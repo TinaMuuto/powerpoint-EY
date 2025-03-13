@@ -226,7 +226,10 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
                                 st.warning(f"Hyperlink for {placeholder} kunne ikke indsættes: {e}")
 
 def replace_image_placeholders(slide, image_values):
-    """Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide."""
+    """
+    Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
+    Billedet skaleres, så det passer inden for placeholder-feltet uden at ændre aspect ratio.
+    """
     for shape in slide.shapes:
         if shape.has_text_frame:
             tekst = shape.text
@@ -237,13 +240,23 @@ def replace_image_placeholders(slide, image_values):
                     if url:
                         img_stream = fetch_and_process_image(url)
                         if img_stream:
-                            left = shape.left
-                            top = shape.top
-                            width = shape.width
-                            height = shape.height
-                            slide.shapes.add_picture(img_stream, left, top, width=width, height=height)
-                            shape.text = ""  # Fjern placeholder-teksten, så billedet vises
+                            # Åbn billedet med PIL for at få dets oprindelige dimensioner
+                            img = Image.open(img_stream)
+                            original_width, original_height = img.size
+                            target_width = shape.width
+                            target_height = shape.height
+                            # Beregn skaleringsfaktor så billedet passer inden for feltet
+                            scale = min(target_width / original_width, target_height / original_height)
+                            new_width = int(original_width * scale)
+                            new_height = int(original_height * scale)
+                            # Gem billedet igen til en ny BytesIO-strøm
+                            new_img_stream = io.BytesIO()
+                            img.save(new_img_stream, format="JPEG")
+                            new_img_stream.seek(0)
+                            slide.shapes.add_picture(new_img_stream, shape.left, shape.top, width=new_width, height=new_height)
+                            shape.text = ""  # Fjern placeholder-teksten
                     break
+
 
 # --- Main Streamlit App ---
 
