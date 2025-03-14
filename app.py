@@ -36,7 +36,7 @@ REQUIRED_MAPPING_COLS_ORIG = [
 ]
 
 REQUIRED_STOCK_COLS_ORIG = [
-    "{{productcode}}",  # i stock-filen er dette med små bogstaver
+    "{{productcode}}",  # I stock-filen er dette med små bogstaver
     "variantfamily",
     "variantcommercialname",
     "rts",
@@ -79,7 +79,6 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
-
 def normalize_text(s):
     """
     Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
@@ -189,20 +188,28 @@ def duplicate_slide(prs, slide):
 
 def replace_text_placeholders(slide, placeholder_values):
     """
-    Erstatter tekstplaceholders i en slide ved hjælp af regex, så eventuelle ekstra mellemrum inden for klammerne ignoreres.
-    Bevarer eksisterende formatering (skriftfarve, størrelse osv.) ved at ændre i hvert run.
+    Erstatter tekstplaceholders i en slide ved at kombinere alle løb i hvert afsnit til én streng,
+    udfører udskiftningen med regex (som ignorerer ekstra mellemrum), og sætter så den samlede tekst tilbage
+    i det første løb for at bevare den overordnede formatering.
     """
     import re
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
-                for run in paragraph.runs:
-                    original_text = run.text
-                    for placeholder, new_text in placeholder_values.items():
-                        key = placeholder.strip("{}").strip()
-                        pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
-                        original_text = re.sub(pattern, new_text, original_text)
-                    run.text = original_text
+                # Kombiner alle løb i afsnittet til én tekst
+                full_text = "".join([run.text for run in paragraph.runs])
+                new_text = full_text
+                for placeholder, replacement in placeholder_values.items():
+                    key = placeholder.strip("{}").strip()
+                    pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
+                    new_text = re.sub(pattern, replacement, new_text)
+                # Fjern alle eksisterende løb og tilføj én ny med den samlede tekst
+                if paragraph.runs:
+                    first_run = paragraph.runs[0]
+                    # Tøm alle løb
+                    for i in range(len(paragraph.runs)-1, -1, -1):
+                        paragraph.runs[i].text = ""
+                    first_run.text = new_text
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
     """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
@@ -255,16 +262,15 @@ def main():
     st.title("PowerPoint Generator App")
     st.write("Upload din brugerfil (Excel) med kolonnerne 'Item no' og 'Product name'")
     
-    # Upload brugerfil
+    # Upload brugerfil med header (første række bruges til kolonnenavne)
     uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
     if uploaded_file is None:
         st.info("Vent venligst på at uploade brugerfilen.")
         return
 
     try:
-        user_df = pd.read_excel(uploaded_file)
-        # Fjern den første række, hvis den indeholder headerinformation, så kun data behandles
-        user_df = user_df.iloc[1:]
+        # Vi antager, at første række er header; alle øvrige rækker er data
+        user_df = pd.read_excel(uploaded_file, header=0)
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
         return
@@ -373,8 +379,8 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-        # Opdater progress bar med et helt tal mellem 0 og 100
-        progress_bar.progress(min(int((index + 1) / total_products * 100), 100))
+        progress_value = min(int((index + 1) / total_products * 100), 100)
+        progress_bar.progress(progress_value)
 
     ppt_io = io.BytesIO()
     try:
@@ -391,4 +397,3 @@ def main():
 
 if __name__ == '__main__':
     main()
- 
