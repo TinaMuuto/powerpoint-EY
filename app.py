@@ -14,6 +14,7 @@ STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
+# Mapping-filens kolonner (bruges som originale navne; vi normaliserer efterfølgende)
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -32,23 +33,17 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product Lifestyle1}}",
     "{{Product Lifestyle2}}",
     "{{Product Lifestyle3}}",
-    "{{Product Lifestyle4}}"
+    "{{Product Lifestyle4}}",
+    "ProductKey"  # Mapping-filens ProductKey
 ]
 
+# Stock-filens kolonner (bruges som originale navne; vi normaliserer efterfølgende)
 REQUIRED_STOCK_COLS_ORIG = [
-    "{{productcode}}",  # I stock-filen er dette med små bogstaver
-    "variantfamily",
-    "variantcommercialname",
-    "rts",
-    "mto"
+    "productkey",    # kolonne B: ProductKey
+    "variantname",   # kolonne D: VariantName
+    "rts",           # kolonne H: RTS
+    "mto"            # kolonne I: MTO
 ]
-
-# Konstant til at tilgå stock-data
-STOCK_CODE_COL = "{{productcode}}"
-STOCK_GROUP_COL = "variantfamily"
-STOCK_VALUE_COL = "variantcommercialname"
-STOCK_RTS_FILTER_COL = "rts"
-STOCK_MTO_FILTER_COL = "mto"
 
 # --- Placeholders til erstatning i templaten ---
 TEXT_PLACEHOLDERS_ORIG = {
@@ -92,8 +87,8 @@ def normalize_col(col):
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
-    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher item_no.
-    Både 'Item no' og mapping-værdien normaliseres, så alle mellemrum ignoreres.
+    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key)
+    matcher 'Item no' (efter normalisering).
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -108,53 +103,69 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
                 return row
     return None
 
-def process_stock_rts(stock_df, product_code):
-    """Behandler RTS-data: Filtrér stock_df for matchende produktkode og ikke-tomme RTS-celler,
-    gruppering på 'variantfamily' og saml værdier fra 'variantcommercialname' med linjeskift."""
-    norm_code = normalize_text(product_code)
+def process_stock_rts_alternative(mapping_row, stock_df):
+    """
+    Logik for {{Product RTS}}:
+      1. Hent ProductKey fra mapping_row (fra kolonnen "ProductKey").
+      2. Filtrer stock_df, så kun rækker, hvor stock['productkey'] matcher (efter normalisering),
+         er med.
+      3. Filtrer herefter, så kun rækker hvor kolonnen "rts" IKKE er tom, medtages.
+      4. Udtræk de unikke værdier fra kolonnen "variantname" (stock).
+      5. Sammenkæd de unikke værdier med linjeskift og returnér resultatet.
+    """
+    product_key = mapping_row.get("productkey", "")
+    if not product_key or pd.isna(product_key):
+        return ""
+    norm_product_key = normalize_text(product_key)
     try:
-        filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+        filtered = stock_df[stock_df["productkey"].apply(lambda x: normalize_text(x) == norm_product_key)]
     except KeyError as e:
-        st.error(f"KeyError i process_stock_rts: {e}")
+        st.error(f"KeyError i process_stock_rts_alternative (productkey): {e}")
         return ""
     if filtered.empty:
         return ""
-    filtered = filtered[filtered[STOCK_RTS_FILTER_COL].notna() & (filtered[STOCK_RTS_FILTER_COL] != "")]
+    filtered = filtered[filtered["rts"].notna() & (filtered["rts"] != "")]
     if filtered.empty:
         return ""
-    result_lines = []
-    grouped = filtered.groupby(STOCK_GROUP_COL)
-    for group_name, group in grouped:
-        values = group[STOCK_VALUE_COL].dropna().astype(str).tolist()
-        if values:
-            group_text = f"{group_name}:"
-            values_text = "\n".join(values)
-            result_lines.append(f"{group_text}\n{values_text}")
-    return "\n".join(result_lines)
+    try:
+        variant_names = filtered["variantname"].dropna().astype(str).tolist()
+    except KeyError as e:
+        st.error(f"KeyError i process_stock_rts_alternative (variantname): {e}")
+        return ""
+    unique_variant_names = list(dict.fromkeys(variant_names))
+    return "\n".join(unique_variant_names)
 
-def process_stock_mto(stock_df, product_code):
-    """Behandler MTO-data: Filtrér stock_df for matchende produktkode og ikke-tomme MTO-celler,
-    gruppering på 'variantfamily' og saml værdier fra 'variantcommercialname' med komma og mellemrum."""
-    norm_code = normalize_text(product_code)
+def process_stock_mto_alternative(mapping_row, stock_df):
+    """
+    Logik for {{Product MTO}}:
+      1. Hent ProductKey fra mapping_row (fra kolonnen "ProductKey").
+      2. Filtrer stock_df, så kun rækker, hvor stock['productkey'] matcher (efter normalisering),
+         er med.
+      3. Filtrer herefter, så kun rækker hvor kolonnen "mto" IKKE er tom, medtages.
+      4. Udtræk de unikke værdier fra kolonnen "variantname" (stock).
+      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
+    """
+    product_key = mapping_row.get("productkey", "")
+    if not product_key or pd.isna(product_key):
+        return ""
+    norm_product_key = normalize_text(product_key)
     try:
-        filtered = stock_df[stock_df[STOCK_CODE_COL].apply(lambda x: normalize_text(x) == norm_code)]
+        filtered = stock_df[stock_df["productkey"].apply(lambda x: normalize_text(x) == norm_product_key)]
     except KeyError as e:
-        st.error(f"KeyError i process_stock_mto: {e}")
+        st.error(f"KeyError i process_stock_mto_alternative (productkey): {e}")
         return ""
     if filtered.empty:
         return ""
-    filtered = filtered[filtered[STOCK_MTO_FILTER_COL].notna() & (filtered[STOCK_MTO_FILTER_COL] != "")]
+    filtered = filtered[filtered["mto"].notna() & (filtered["mto"] != "")]
     if filtered.empty:
         return ""
-    result_lines = []
-    grouped = filtered.groupby(STOCK_GROUP_COL)
-    for group_name, group in grouped:
-        values = group[STOCK_VALUE_COL].dropna().astype(str).tolist()
-        if values:
-            group_text = f"{group_name}:"
-            values_text = ", ".join(values)
-            result_lines.append(f"{group_text}\n{values_text}")
-    return "\n".join(result_lines)
+    try:
+        variant_names = filtered["variantname"].dropna().astype(str).tolist()
+    except KeyError as e:
+        st.error(f"KeyError i process_stock_mto_alternative (variantname): {e}")
+        return ""
+    unique_variant_names = list(dict.fromkeys(variant_names))
+    return ", ".join(unique_variant_names)
 
 def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
@@ -189,7 +200,7 @@ def duplicate_slide(prs, slide):
 def replace_text_placeholders(slide, placeholder_values):
     """
     Erstatter tekstplaceholders i en slide ved at kombinere alle løb i hvert afsnit til én streng,
-    udfører udskiftningen med regex (som ignorerer ekstra mellemrum), og sætter den samlede tekst tilbage
+    udfører udskiftningen med regex (som ignorerer ekstra mellemrum) og sætter den samlede tekst tilbage
     i det første run for at bevare den overordnede formatering.
     """
     import re
@@ -348,23 +359,17 @@ def main():
         for ph, label in TEXT_PLACEHOLDERS_ORIG.items():
             norm_ph = normalize_col(ph)
             value = mapping_row.get(norm_ph, "")
-            if not value:
-                # Fallback: kig efter en nøgle, der matcher ph (ignorerer mellemrum)
-                for key in mapping_row.keys():
-                    if key.strip() == ph.strip():
-                        value = mapping_row.get(key, "")
-                        break
             if pd.isna(value):
                 value = ""
-            # For de tre felter indsætter vi et mellemrum i stedet for linjeskift
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
             else:
                 placeholder_texts[ph] = f"{label}\n{value}"
 
         product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
-        rts_text = process_stock_rts(stock_df, product_code)
-        mto_text = process_stock_mto(stock_df, product_code)
+        # Brug den alternative logik til {{Product RTS}} og {{Product MTO}}:
+        rts_text = process_stock_rts_alternative(mapping_row, stock_df)
+        mto_text = process_stock_mto_alternative(mapping_row, stock_df)
         placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
         placeholder_texts["{{Product MTO}}"] = f"Avilable for made to order:\n{mto_text}"
 
