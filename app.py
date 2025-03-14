@@ -8,13 +8,13 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# --- Filstier (tilpas efter behov) ---
+# Filstier – juster efter behov (f.eks. "data/mapping-file.xlsx")
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
-# Mapping-filens originale kolonnenavne (vi normaliserer senere)
+# Mapping-filens kolonner (originale; vi normaliserer efterfølgende)
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -37,12 +37,12 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
-# Stock-filens originale kolonnenavne
+# Stock-filens kolonner (originale)
 REQUIRED_STOCK_COLS_ORIG = [
-    "productkey",    # kolonne B: ProductKey
-    "variantname",   # kolonne D: VariantName
-    "rts",           # kolonne H: RTS
-    "mto"            # kolonne I: MTO
+    "productkey",    # Kolonne B: ProductKey
+    "variantname",   # Kolonne D: VariantName
+    "rts",           # Kolonne H: RTS
+    "mto"            # Kolonne I: MTO
 ]
 
 # --- Placeholders til erstatning i templaten ---
@@ -76,7 +76,10 @@ IMAGE_PLACEHOLDERS_ORIG = [
 # --- Hjælpefunktioner ---
 
 def normalize_text(s):
-    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    """
+    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
+    Dette sikrer, at ekstra mellemrum ignoreres.
+    """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
@@ -86,7 +89,7 @@ def normalize_col(col):
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
     Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher 'Item no'.
-    Sammenligningen foretages ved at normalisere begge værdier.
+    Sammenligning sker med normaliserede værdier.
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -105,11 +108,10 @@ def process_stock_rts_alternative(mapping_row, stock_df):
     """
     Logik for {{Product RTS}}:
       1. Hent 'ProductKey' fra mapping_row.
-      2. Filtrer stock_df, så kun rækker, hvor 'productkey' matcher mapping_row's ProductKey, er med.
-      3. Filtrer herefter, så kun rækker, hvor kolonnen 'rts' IKKE er tom, medtages.
-      4. Udtræk de unikke værdier fra kolonnen 'variantname' i stock, fjern dubletter,
-         og sammenkæd dem med ", " (komma og mellemrum).
-      5. Returnér den sammenkædte streng.
+      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' (efter normalisering) er med.
+      3. Filtrer herefter, så kun rækker med en ikke-tom 'rts' er med.
+      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -137,11 +139,10 @@ def process_stock_mto_alternative(mapping_row, stock_df):
     """
     Logik for {{Product MTO}}:
       1. Hent 'ProductKey' fra mapping_row.
-      2. Filtrer stock_df, så kun rækker, hvor 'productkey' matcher mapping_row's ProductKey, er med.
-      3. Filtrer herefter, så kun rækker, hvor kolonnen 'mto' IKKE er tom, medtages.
-      4. Udtræk de unikke værdier fra kolonnen 'variantname' i stock, fjern dubletter,
-         og sammenkæd dem med ", " (komma og mellemrum).
-      5. Returnér den sammenkædte streng.
+      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' er med.
+      3. Filtrer herefter, så kun rækker med en ikke-tom 'mto' er med.
+      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -168,9 +169,8 @@ def process_stock_mto_alternative(mapping_row, stock_df):
 def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
     Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
-    konverteres det til RGB. Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
-    Timeout er øget til 30 sekunder.
-    Returnerer et BytesIO-objekt med billedet, eller None hvis hentning fejler.
+    konverteres det til RGB. Billedet komprimeres med lavere JPEG-kvalitet og begrænset størrelse.
+    Returnerer et BytesIO-objekt med billedet.
     """
     try:
         response = requests.get(url, timeout=30)
@@ -188,7 +188,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     return None
 
 def duplicate_slide(prs, slide):
-    """Duplicer en slide ved at kopiere dens elementer – svarende til Ctrl+D."""
+    """Duplicer en slide ved at kopiere dens elementer (svarer til Ctrl+D)."""
     slide_layout = slide.slide_layout
     new_slide = prs.slides.add_slide(slide_layout)
     new_slide.shapes._spTree.clear()
@@ -198,9 +198,9 @@ def duplicate_slide(prs, slide):
 
 def replace_text_placeholders(slide, placeholder_values):
     """
-    Erstatter tekstplaceholders i en slide ved at kombinere alle løb i hvert afsnit til én streng,
-    udfører udskiftningen med regex (som ignorerer ekstra mellemrum) og sætter den samlede tekst tilbage
-    i det første run for at bevare den overordnede formatering.
+    Erstatter tekstplaceholders i en slide. For hvert afsnit kombineres alle løb til én streng,
+    dernæst udføres udskiftning (med regex, så ekstra mellemrum ignoreres) og resultatet sættes tilbage
+    i det første run, så den oprindelige formatering bevares.
     """
     import re
     for shape in slide.shapes:
@@ -267,33 +267,28 @@ def replace_image_placeholders(slide, image_values):
 # --- Main Streamlit App ---
 def main():
     st.title("PowerPoint Generator App")
-    st.write("Upload din brugerfil (Excel) med kolonnerne 'Item no' og 'Product name'")
+    st.write("Upload din brugerfil (Excel). Filen skal indeholde mindst en kolonne, hvis header (efter normalisering) er 'itemno'.")
     
-    # Hvis vi allerede har genereret PPT, så brug session_state
-    if "ppt_generated" in st.session_state and st.session_state.ppt_generated:
-        st.success("PowerPoint genereret succesfuldt!")
-        st.download_button("Download PowerPoint", st.session_state.generated_ppt,
-                           file_name="generated_presentation.pptx",
-                           mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-        st.progress(100)
-        return
-
-    # Upload brugerfil med header (første række bruges som header)
+    # Upload brugerfil
     uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
     if uploaded_file is None:
         st.info("Vent venligst på at uploade brugerfilen.")
         return
 
+    # Gem den uploadede fil i session_state, så den bevares ved re-run
+    if "uploaded_file" not in st.session_state:
+        st.session_state.uploaded_file = uploaded_file
+
     try:
-        user_df = pd.read_excel(uploaded_file, header=0)
+        user_df = pd.read_excel(st.session_state.uploaded_file, header=0)
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
         return
 
-    # Valider brugerfilens kolonner
-    required_user_cols = {"Item no", "Product name"}
-    if not required_user_cols.issubset(set(user_df.columns)):
-        st.error(f"Brugerfilen skal indeholde kolonnerne: {required_user_cols}. Fundne kolonner: {list(user_df.columns)}")
+    # Find kolonne for 'itemno' (normaliseret)
+    itemno_cols = [col for col in user_df.columns if normalize_text(col) == "itemno"]
+    if not itemno_cols:
+        st.error("Brugerfilen skal indeholde en kolonne med header 'Item no' (uanset mellemrum og store/små bogstaver).")
         return
 
     st.write("Brugerfil indlæst succesfuldt!")
@@ -355,7 +350,8 @@ def main():
 
     total_products = len(user_df)
     for index, product in user_df.iterrows():
-        item_no = product["Item no"]
+        # Brug den fundne 'itemno'-kolonne
+        item_no = product[itemno_cols[0]]
         slide = duplicate_slide(prs, template_slide)
 
         mapping_row = find_mapping_row(item_no, mapping_df, MAPPING_PRODUCT_CODE_KEY)
@@ -369,6 +365,7 @@ def main():
             value = mapping_row.get(norm_ph, "")
             if pd.isna(value):
                 value = ""
+            # For disse felter indsættes data på samme linje (med et mellemrum)
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
             else:
@@ -415,12 +412,10 @@ def main():
     st.download_button("Download PowerPoint", ppt_io,
                        file_name="generated_presentation.pptx",
                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-    
-    # Gem den genererede PPT i session_state, så progress baren forbliver komplet
-    st.session_state.ppt_generated = True
+    # Gem i session_state, så UI'et forbliver intakt ved download
     st.session_state.generated_ppt = ppt_io
 
 if __name__ == '__main__':
-    if 'ppt_generated' not in st.session_state:
-        st.session_state.ppt_generated = False
+    if 'generated_ppt' not in st.session_state:
+        st.session_state.generated_ppt = None
     main()
