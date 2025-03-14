@@ -1,20 +1,18 @@
 import streamlit as st
 import pandas as pd
 from pptx import Presentation
-from pptx.util import Inches, Pt
 import io
 import re
 import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster efter behov
+# Filstier – juster efter behov (fx "data/mapping-file.xlsx")
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
-# Mapping-filens originale kolonnenavne (vi normaliserer senere)
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -37,7 +35,6 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
-# Stock-filens originale kolonnenavne
 REQUIRED_STOCK_COLS_ORIG = [
     "productkey",    # Kolonne B: ProductKey
     "variantname",   # Kolonne D: VariantName
@@ -45,7 +42,7 @@ REQUIRED_STOCK_COLS_ORIG = [
     "mto"            # Kolonne I: MTO
 ]
 
-# --- Placeholders til erstatning i templaten ---
+# --- Placeholders ---
 TEXT_PLACEHOLDERS_ORIG = {
     "{{Product name}}": "Product Name:",
     "{{Product code}}": "Product Code:",
@@ -75,21 +72,13 @@ IMAGE_PLACEHOLDERS_ORIG = [
 
 # --- Hjælpefunktioner ---
 def normalize_text(s):
-    """
-    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
-    Dette sikrer, at ekstra mellemrum ignoreres.
-    """
+    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
-    """Normaliserer et kolonnenavn."""
     return normalize_text(col)
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
-    """
-    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher 'Item no'
-    (sammenlignet med normaliserede værdier).
-    """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
         code = row.get(mapping_prod_key, "")
@@ -104,14 +93,6 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     return None
 
 def process_stock_rts_alternative(mapping_row, stock_df):
-    """
-    Logik for {{Product RTS}}:
-      1. Hent 'ProductKey' fra mapping_row.
-      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' (efter normalisering) er med.
-      3. Filtrer herefter, så kun rækker med en ikke-tom 'rts' er med.
-      4. Udtræk unikke værdier fra kolonnen 'variantname' i stock.
-      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
-    """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
         return ""
@@ -119,7 +100,7 @@ def process_stock_rts_alternative(mapping_row, stock_df):
     try:
         filtered = stock_df[stock_df["productkey"].apply(lambda x: normalize_text(x) == norm_product_key)]
     except KeyError as e:
-        st.error(f"KeyError i process_stock_rts_alternative (productkey): {e}")
+        st.error(f"KeyError i RTS (productkey): {e}")
         return ""
     if filtered.empty:
         return ""
@@ -129,20 +110,12 @@ def process_stock_rts_alternative(mapping_row, stock_df):
     try:
         variant_names = filtered["variantname"].dropna().astype(str).tolist()
     except KeyError as e:
-        st.error(f"KeyError i process_stock_rts_alternative (variantname): {e}")
+        st.error(f"KeyError i RTS (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
     return ", ".join(unique_variant_names)
 
 def process_stock_mto_alternative(mapping_row, stock_df):
-    """
-    Logik for {{Product MTO}}:
-      1. Hent 'ProductKey' fra mapping_row.
-      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' er med.
-      3. Filtrer herefter, så kun rækker med en ikke-tom 'mto' er med.
-      4. Udtræk unikke værdier fra kolonnen 'variantname' i stock.
-      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
-    """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
         return ""
@@ -150,7 +123,7 @@ def process_stock_mto_alternative(mapping_row, stock_df):
     try:
         filtered = stock_df[stock_df["productkey"].apply(lambda x: normalize_text(x) == norm_product_key)]
     except KeyError as e:
-        st.error(f"KeyError i process_stock_mto_alternative (productkey): {e}")
+        st.error(f"KeyError i MTO (productkey): {e}")
         return ""
     if filtered.empty:
         return ""
@@ -160,18 +133,12 @@ def process_stock_mto_alternative(mapping_row, stock_df):
     try:
         variant_names = filtered["variantname"].dropna().astype(str).tolist()
     except KeyError as e:
-        st.error(f"KeyError i process_stock_mto_alternative (variantname): {e}")
+        st.error(f"KeyError i MTO (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
     return ", ".join(unique_variant_names)
 
 def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
-    """
-    Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
-    konverteres det til RGB. Billedet komprimeres med lavere JPEG-kvalitet og begrænset størrelse.
-    Timeout er øget til 30 sekunder.
-    Returnerer et BytesIO-objekt med billedet, eller None hvis hentning fejler.
-    """
     try:
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
@@ -188,7 +155,6 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     return None
 
 def duplicate_slide(prs, slide):
-    """Duplicer en slide ved at kopiere dens elementer – svarende til Ctrl+D."""
     slide_layout = slide.slide_layout
     new_slide = prs.slides.add_slide(slide_layout)
     new_slide.shapes._spTree.clear()
@@ -197,11 +163,6 @@ def duplicate_slide(prs, slide):
     return new_slide
 
 def replace_text_placeholders(slide, placeholder_values):
-    """
-    Erstatter tekstplaceholders i en slide ved at kombinere alle løb i hvert afsnit til én streng,
-    udfører udskiftningen med regex (som ignorerer ekstra mellemrum) og sætter den samlede tekst tilbage
-    i det første run for at bevare den overordnede formatering.
-    """
     import re
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -219,9 +180,6 @@ def replace_text_placeholders(slide, placeholder_values):
                     first_run.text = new_text
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
-    """
-    Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL.
-    """
     import re
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -238,10 +196,6 @@ def replace_hyperlink_placeholders(slide, hyperlink_values):
                                 st.warning(f"Hyperlink for {placeholder} kunne ikke indsættes: {e}")
 
 def replace_image_placeholders(slide, image_values):
-    """
-    Erstatter billedplaceholders med billeder hentet fra URL'er (komprimeret) i en slide.
-    Billedet skaleres, så det bevarer sit aspect ratio.
-    """
     for shape in slide.shapes:
         if shape.has_text_frame:
             tekst = shape.text
@@ -266,42 +220,25 @@ def replace_image_placeholders(slide, image_values):
                             shape.text = ""
                     break
 
-# --- Main Streamlit App ---
+# --- Main App ---
 def main():
     st.title("PowerPoint Generator App")
-    st.write("Upload din brugerfil (Excel) med to kolonner: 'Item no' og 'Product name'.")
+    st.write("Indsæt varenumre (Item no) – ét per linje:")
+    pasted_text = st.text_area("Indsæt varenumre her", height=200)
     
-    # Vælg inputmetode: Upload eller paste
-    input_method = st.radio("Vælg inputmetode", ("Upload Excel-fil", "Paste varenumre"))
-    
-    if input_method == "Upload Excel-fil":
-        uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
-        if uploaded_file is None:
-            st.info("Vent venligst på at uploade filen.")
-            return
-        try:
-            user_df = pd.read_excel(uploaded_file, header=0)
-        except Exception as e:
-            st.error(f"Fejl ved læsning af brugerfil: {e}")
-            return
-        # Valider at filen indeholder præcis to kolonner
-        if set(user_df.columns) != {"Item no", "Product name"}:
-            st.error("Brugerfilen skal indeholde præcis to kolonner med headers 'Item no' og 'Product name'.")
-            return
-    else:
-        # Hvis brugeren vælger at paste varenumre, forventes de at være semikolonsepareret
-        varenumre_text = st.text_area("Indsæt varenumre (adskilt med semikolon ';')", height=150)
-        if not varenumre_text.strip():
-            st.info("Indsæt venligst varenumre i tekstfeltet.")
-            return
-        # Split og opret en DataFrame med to kolonner (Item no og en tom Product name)
-        varenumre = [num.strip() for num in varenumre_text.split(";") if num.strip()]
-        if not varenumre:
-            st.error("Ingen gyldige varenumre fundet. Sørg for at de er adskilt med semikolon.")
-            return
-        user_df = pd.DataFrame({"Item no": varenumre, "Product name": [""] * len(varenumre)})
+    if not pasted_text.strip():
+        st.info("Indsæt venligst varenumre (Item no) i tekstfeltet.")
+        return
 
-    st.write("Brugerfil indlæst succesfuldt!")
+    # Split inputtet ved linjeskift og opret en DataFrame med to kolonner: 'Item no' og 'Product name' (tom)
+    varenumre = [line.strip() for line in pasted_text.splitlines() if line.strip()]
+    if not varenumre:
+        st.error("Ingen gyldige varenumre fundet.")
+        return
+
+    user_df = pd.DataFrame({"Item no": varenumre, "Product name": [""] * len(varenumre)})
+
+    st.write("Brugerdata oprettet succesfuldt!")
     st.info("Validerer filer...")
     progress_bar = st.progress(10)
 
