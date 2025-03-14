@@ -163,7 +163,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     Returnerer et BytesIO-objekt med billedet.
     """
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=30)
         if response.status_code == 200:
             img = Image.open(io.BytesIO(response.content))
             if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info) or (img.format and img.format.lower() == "tiff"):
@@ -174,7 +174,7 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
             img_byte_arr.seek(0)
             return img_byte_arr
     except Exception as e:
-        st.error(f"Fejl ved hentning af billede fra {url}: {e}")
+        st.warning(f"Fejl ved hentning af billede fra {url}: {e}")
     return None
 
 def duplicate_slide(prs, slide):
@@ -189,24 +189,21 @@ def duplicate_slide(prs, slide):
 def replace_text_placeholders(slide, placeholder_values):
     """
     Erstatter tekstplaceholders i en slide ved at kombinere alle løb i hvert afsnit til én streng,
-    udfører udskiftningen med regex (som ignorerer ekstra mellemrum), og sætter så den samlede tekst tilbage
-    i det første løb for at bevare den overordnede formatering.
+    udfører udskiftningen med regex (som ignorerer ekstra mellemrum), og sætter den samlede tekst tilbage
+    i det første run for at bevare den overordnede formatering.
     """
     import re
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
-                # Kombiner alle løb i afsnittet til én tekst
                 full_text = "".join([run.text for run in paragraph.runs])
                 new_text = full_text
                 for placeholder, replacement in placeholder_values.items():
                     key = placeholder.strip("{}").strip()
                     pattern = r"\{\{\s*" + re.escape(key) + r"\s*\}\}"
                     new_text = re.sub(pattern, replacement, new_text)
-                # Fjern alle eksisterende løb og tilføj én ny med den samlede tekst
                 if paragraph.runs:
                     first_run = paragraph.runs[0]
-                    # Tøm alle løb
                     for i in range(len(paragraph.runs)-1, -1, -1):
                         paragraph.runs[i].text = ""
                     first_run.text = new_text
@@ -262,14 +259,13 @@ def main():
     st.title("PowerPoint Generator App")
     st.write("Upload din brugerfil (Excel) med kolonnerne 'Item no' og 'Product name'")
     
-    # Upload brugerfil med header (første række bruges til kolonnenavne)
+    # Upload brugerfil med header (første række bruges som header)
     uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
     if uploaded_file is None:
         st.info("Vent venligst på at uploade brugerfilen.")
         return
 
     try:
-        # Vi antager, at første række er header; alle øvrige rækker er data
         user_df = pd.read_excel(uploaded_file, header=0)
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
@@ -282,6 +278,8 @@ def main():
         return
 
     st.write("Brugerfil indlæst succesfuldt!")
+    st.info("Validerer filer...")
+    progress_bar = st.progress(10)
 
     # Indlæs og normalisér mapping-filen
     try:
@@ -298,6 +296,7 @@ def main():
         return
 
     st.write("Mapping-fil indlæst succesfuldt!")
+    progress_bar.progress(30)
     MAPPING_PRODUCT_CODE_KEY = normalize_col("{{Product code}}")
 
     # Indlæs og normalisér stock-filen
@@ -315,6 +314,7 @@ def main():
         return
 
     st.write("Stock-fil indlæst succesfuldt!")
+    progress_bar.progress(50)
 
     # Indlæs PowerPoint templaten
     try:
@@ -327,15 +327,14 @@ def main():
         st.error("Template-filen skal indeholde mindst én slide.")
         return
 
+    st.write("Template-fil indlæst succesfuldt!")
+    progress_bar.progress(70)
+
     # Brug første slide som template og fjern den fra præsentationen
     template_slide = prs.slides[0]
     prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
 
-    # Opsæt progress bar
     total_products = len(user_df)
-    progress_bar = st.progress(0)
-
-    # For hvert produkt i brugerfilen
     for index, product in user_df.iterrows():
         item_no = product["Item no"]
         slide = duplicate_slide(prs, template_slide)
@@ -349,9 +348,19 @@ def main():
         for ph, label in TEXT_PLACEHOLDERS_ORIG.items():
             norm_ph = normalize_col(ph)
             value = mapping_row.get(norm_ph, "")
+            if not value:
+                # Fallback: kig efter en nøgle, der matcher ph (ignorerer mellemrum)
+                for key in mapping_row.keys():
+                    if key.strip() == ph.strip():
+                        value = mapping_row.get(key, "")
+                        break
             if pd.isna(value):
                 value = ""
-            placeholder_texts[ph] = f"{label}\n{value}"
+            # For de tre felter indsætter vi et mellemrum i stedet for linjeskift
+            if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
+                placeholder_texts[ph] = f"{label} {value}"
+            else:
+                placeholder_texts[ph] = f"{label}\n{value}"
 
         product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
         rts_text = process_stock_rts(stock_df, product_code)
@@ -379,7 +388,7 @@ def main():
             image_vals[ph] = url
         replace_image_placeholders(slide, image_vals)
 
-        progress_value = min(int((index + 1) / total_products * 100), 100)
+        progress_value = 70 + min(int((index + 1) / total_products * 30), 30)
         progress_bar.progress(progress_value)
 
     ppt_io = io.BytesIO()
