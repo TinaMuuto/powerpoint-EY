@@ -7,12 +7,12 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster efter behov (fx "data/mapping-file.xlsx")
+# Filstier – juster efter behov
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
-# --- Forventede kolonner ---
+# --- Forventede kolonner i mapping-fil ---
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -35,6 +35,7 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
+# --- Forventede kolonner i stock-fil ---
 REQUIRED_STOCK_COLS_ORIG = [
     "productkey",    # Kolonne B: ProductKey
     "variantname",   # Kolonne D: VariantName
@@ -42,7 +43,7 @@ REQUIRED_STOCK_COLS_ORIG = [
     "mto"            # Kolonne I: MTO
 ]
 
-# --- Placeholders ---
+# --- Placeholders til erstatning i templaten ---
 TEXT_PLACEHOLDERS_ORIG = {
     "{{Product name}}": "Product Name:",
     "{{Product code}}": "Product Code:",
@@ -72,13 +73,20 @@ IMAGE_PLACEHOLDERS_ORIG = [
 
 # --- Hjælpefunktioner ---
 def normalize_text(s):
-    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
+    """
+    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
+    Dette sikrer, at ekstra mellemrum ignoreres.
+    """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
     return normalize_text(col)
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
+    """
+    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key)
+    matcher 'Item no' (efter normalisering).
+    """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
         code = row.get(mapping_prod_key, "")
@@ -93,6 +101,14 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     return None
 
 def process_stock_rts_alternative(mapping_row, stock_df):
+    """
+    Logik for {{Product RTS}}:
+      1. Hent 'ProductKey' fra mapping_row.
+      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' (efter normalisering) er med.
+      3. Filtrer herefter, så kun rækker med en ikke-tom 'rts' er med.
+      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      5. Sammenkæd de unikke værdier med linjeskift og returnér resultatet.
+    """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
         return ""
@@ -113,9 +129,17 @@ def process_stock_rts_alternative(mapping_row, stock_df):
         st.error(f"KeyError i RTS (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
-    return ", ".join(unique_variant_names)
+    return "\n".join(unique_variant_names)
 
 def process_stock_mto_alternative(mapping_row, stock_df):
+    """
+    Logik for {{Product MTO}}:
+      1. Hent 'ProductKey' fra mapping_row.
+      2. Filtrer stock_df, så kun rækker med en matchende 'productkey' er med.
+      3. Filtrer herefter, så kun rækker med en ikke-tom 'mto' er med.
+      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
+    """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
         return ""
@@ -220,17 +244,17 @@ def replace_image_placeholders(slide, image_values):
                             shape.text = ""
                     break
 
-# --- Main App ---
+# --- Main Streamlit App ---
 def main():
     st.title("PowerPoint Generator App")
     st.write("Indsæt varenumre (Item no) – ét per linje:")
+    st.info("Bemærk: Indsæt venligst varenumre uden ekstra mellemrum omkring bindestregerne, f.eks. '03084' eller '12345-AB'.")
     pasted_text = st.text_area("Indsæt varenumre her", height=200)
     
     if not pasted_text.strip():
-        st.info("Indsæt venligst varenumre (Item no) i tekstfeltet.")
+        st.info("Indsæt venligst varenumre i tekstfeltet.")
         return
 
-    # Split inputtet ved linjeskift og opret en DataFrame med to kolonner: 'Item no' og 'Product name' (tom)
     varenumre = [line.strip() for line in pasted_text.splitlines() if line.strip()]
     if not varenumre:
         st.error("Ingen gyldige varenumre fundet.")
@@ -291,7 +315,6 @@ def main():
     st.write("Template-fil indlæst succesfuldt!")
     progress_bar.progress(70)
 
-    # Brug første slide som template og fjern den fra præsentationen
     template_slide = prs.slides[0]
     prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
 
@@ -313,6 +336,8 @@ def main():
                 value = ""
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
+            elif ph in ("{{CertificateName}}", "{{Product Consumption COM}}"):
+                placeholder_texts[ph] = f"{label}\n\n{value}"
             else:
                 placeholder_texts[ph] = f"{label}\n{value}"
 
