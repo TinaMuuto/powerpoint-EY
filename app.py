@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pptx import Presentation
+from pptx.util import Inches, Pt
 import io
 import re
 import requests
@@ -71,12 +72,39 @@ IMAGE_PLACEHOLDERS_ORIG = [
     "{{Product Lifestyle4}}",
 ]
 
+# --- Ekstra funktion til gruppering af variantnavne ---
+def group_variant_names(variant_names):
+    """
+    Grupperer en liste af variantnavne baseret på præfikset (delen før " - ").
+    For hver gruppe fjernes dubletter, og de resterende dele (efter " - ") sammenkædes med ", ".
+    Hvis et navn ikke indeholder " - ", bruges hele navnet som nøgle.
+    Returnerer en samlet streng, hvor hver gruppe adskilles med linjeskift.
+    """
+    groups = {}
+    for name in variant_names:
+        if " - " in name:
+            prefix, suffix = name.split(" - ", 1)
+        else:
+            prefix, suffix = name, ""
+        prefix = prefix.strip()
+        suffix = suffix.strip()
+        groups.setdefault(prefix, set())
+        if suffix:
+            groups[prefix].add(suffix)
+    output_lines = []
+    for prefix, suffixes in groups.items():
+        # Sorter suffixerne for konsistens
+        suffix_list = sorted(suffixes)
+        if suffix_list:
+            line = f"{prefix} - " + ", ".join(suffix_list)
+        else:
+            line = prefix
+        output_lines.append(line)
+    return "\n".join(sorted(output_lines))
+
 # --- Hjælpefunktioner ---
 def normalize_text(s):
-    """
-    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
-    Dette sikrer, at ekstra mellemrum ignoreres.
-    """
+    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
@@ -85,7 +113,7 @@ def normalize_col(col):
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
     Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key)
-    matcher 'Item no' (efter normalisering).
+    matcher 'Item no' (normaliseret).
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -107,7 +135,7 @@ def process_stock_rts_alternative(mapping_row, stock_df):
       2. Filtrer stock_df, så kun rækker med en matchende 'productkey' (efter normalisering) er med.
       3. Filtrer herefter, så kun rækker med en ikke-tom 'rts' er med.
       4. Udtræk unikke værdier fra kolonnen 'variantname'.
-      5. Sammenkæd de unikke værdier med linjeskift og returnér resultatet.
+      5. Gruppér disse værdier med group_variant_names() og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -129,7 +157,7 @@ def process_stock_rts_alternative(mapping_row, stock_df):
         st.error(f"KeyError i RTS (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
-    return "\n".join(unique_variant_names)
+    return group_variant_names(unique_variant_names)
 
 def process_stock_mto_alternative(mapping_row, stock_df):
     """
@@ -138,7 +166,7 @@ def process_stock_mto_alternative(mapping_row, stock_df):
       2. Filtrer stock_df, så kun rækker med en matchende 'productkey' er med.
       3. Filtrer herefter, så kun rækker med en ikke-tom 'mto' er med.
       4. Udtræk unikke værdier fra kolonnen 'variantname'.
-      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
+      5. Gruppér disse værdier med group_variant_names() og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -160,7 +188,7 @@ def process_stock_mto_alternative(mapping_row, stock_df):
         st.error(f"KeyError i MTO (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
-    return ", ".join(unique_variant_names)
+    return group_variant_names(unique_variant_names)
 
 def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     try:
@@ -247,8 +275,8 @@ def replace_image_placeholders(slide, image_values):
 # --- Main Streamlit App ---
 def main():
     st.title("PowerPoint Generator App")
-    st.write("Indsæt varenumre (Item no) – ét per linje:")
-    st.info("Bemærk: Indsæt venligst varenumre uden ekstra mellemrum omkring bindestregerne, f.eks. '03084' eller '12345-AB'.")
+    st.write("Indsæt varenumre (Item no) – ét pr. linje:")
+    st.info("Bemærk: Indsæt varenumre uden ekstra mellemrum omkring bindestregerne, f.eks. '03084' eller '12345-AB'.")
     pasted_text = st.text_area("Indsæt varenumre her", height=200)
     
     if not pasted_text.strip():
@@ -334,6 +362,8 @@ def main():
             value = mapping_row.get(norm_ph, "")
             if pd.isna(value):
                 value = ""
+            # For felterne {{Product code}}, {{Product name}} og {{Product country of origin}} indsættes data på samme linje.
+            # For {{CertificateName}} og {{Product Consumption COM}} indsættes et ekstra linjeskift før data.
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
             elif ph in ("{{CertificateName}}", "{{Product Consumption COM}}"):
@@ -344,8 +374,8 @@ def main():
         product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
         rts_text = process_stock_rts_alternative(mapping_row, stock_df)
         mto_text = process_stock_mto_alternative(mapping_row, stock_df)
-        placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
-        placeholder_texts["{{Product MTO}}"] = f"Avilable for made to order:\n{mto_text}"
+        placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n\n{rts_text}"
+        placeholder_texts["{{Product MTO}}"] = f"Avilable for made to order:\n\n{mto_text}"
 
         replace_text_placeholders(slide, placeholder_texts)
 
