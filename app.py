@@ -8,13 +8,12 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster efter behov (fx "data/mapping-file.xlsx")
+# Filstier – juster efter behov (fx "data/mapping-file.xlsx" osv.)
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
-# --- Forventede kolonner ---
-# Mapping-filens kolonner (bruges som originale; vi normaliserer efterfølgende)
+# --- Forventede kolonner i mapping-fil ---
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -37,7 +36,7 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
-# Stock-filens kolonner (bruges som originale)
+# --- Forventede kolonner i stock-fil ---
 REQUIRED_STOCK_COLS_ORIG = [
     "productkey",    # kolonne B: ProductKey
     "variantname",   # kolonne D: VariantName
@@ -74,15 +73,16 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
+
 def normalize_text(s):
     """
     Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
-    Dette sikrer, at ekstra mellemrum ignoreres.
+    Sikrer, at ekstra mellemrum ignoreres.
     """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
-    """Normaliserer et kolonnenavn ved at anvende normalize_text."""
+    """Normaliserer et kolonnenavn."""
     return normalize_text(col)
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
@@ -219,7 +219,9 @@ def replace_text_placeholders(slide, placeholder_values):
                     first_run.text = new_text
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
-    """Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL."""
+    """
+    Erstatter hyperlink-placeholders i en slide med display-tekst og tilhørende URL.
+    """
     import re
     for shape in slide.shapes:
         if shape.has_text_frame:
@@ -267,7 +269,7 @@ def replace_image_placeholders(slide, image_values):
 # --- Main Streamlit App ---
 def main():
     st.title("PowerPoint Generator App")
-    st.write("Upload din brugerfil (Excel). Filen skal have den første kolonne som 'Item no' (uanset mellemrum og store/små bogstaver).")
+    st.write("Upload din brugerfil (Excel) med to kolonner: 'Item no' (første kolonne) og 'Product name' (anden kolonne).")
     
     # Upload brugerfil med header (første række bruges som header)
     uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
@@ -275,20 +277,15 @@ def main():
         st.info("Vent venligst på at uploade brugerfilen.")
         return
 
-    # Gem den uploadede fil i session_state, så UI'et ikke fjernes ved download
-    if "uploaded_file" not in st.session_state:
-        st.session_state.uploaded_file = uploaded_file
-
     try:
-        user_df = pd.read_excel(st.session_state.uploaded_file, header=0)
+        user_df = pd.read_excel(uploaded_file, header=0)
     except Exception as e:
         st.error(f"Fejl ved læsning af brugerfil: {e}")
         return
 
-    # Tjek, at den første kolonne, når den normaliseres, er "itemno"
-    first_col_normalized = normalize_text(user_df.columns[0])
-    if first_col_normalized != "itemno":
-        st.error("Brugerfilen skal have den første kolonne med header 'Item no' (uanset mellemrum og store/små bogstaver).")
+    # Valider at filen indeholder præcis de to kolonner
+    if set(user_df.columns) != {"Item no", "Product name"}:
+        st.error("Brugerfilen skal indeholde præcis to kolonner med headers 'Item no' og 'Product name'.")
         return
 
     st.write("Brugerfil indlæst succesfuldt!")
@@ -350,7 +347,7 @@ def main():
 
     total_products = len(user_df)
     for index, product in user_df.iterrows():
-        item_no = product[user_df.columns[0]]
+        item_no = product["Item no"]
         slide = duplicate_slide(prs, template_slide)
 
         mapping_row = find_mapping_row(item_no, mapping_df, MAPPING_PRODUCT_CODE_KEY)
@@ -364,6 +361,7 @@ def main():
             value = mapping_row.get(norm_ph, "")
             if pd.isna(value):
                 value = ""
+            # For de tre felter indsættes data på samme linje med et mellemrum
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
             else:
@@ -411,10 +409,10 @@ def main():
                        file_name="generated_presentation.pptx",
                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
     
-    # Gem den genererede PPT i session_state, så UI'et forbliver ved download
     st.session_state.generated_ppt = ppt_io
 
 if __name__ == '__main__':
     if 'generated_ppt' not in st.session_state:
         st.session_state.generated_ppt = None
     main()
+    
