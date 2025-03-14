@@ -8,12 +8,13 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster efter behov (fx "data/mapping-file.xlsx" osv.)
+# Filstier – juster efter behov
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
-# --- Forventede kolonner i mapping-fil ---
+# --- Forventede kolonner ---
+# Mapping-filens originale kolonnenavne (vi normaliserer senere)
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -36,12 +37,12 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
-# --- Forventede kolonner i stock-fil ---
+# Stock-filens originale kolonnenavne
 REQUIRED_STOCK_COLS_ORIG = [
-    "productkey",    # kolonne B: ProductKey
-    "variantname",   # kolonne D: VariantName
-    "rts",           # kolonne H: RTS
-    "mto"            # kolonne I: MTO
+    "productkey",    # Kolonne B: ProductKey
+    "variantname",   # Kolonne D: VariantName
+    "rts",           # Kolonne H: RTS
+    "mto"            # Kolonne I: MTO
 ]
 
 # --- Placeholders til erstatning i templaten ---
@@ -73,11 +74,10 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
-
 def normalize_text(s):
     """
     Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
-    Sikrer, at ekstra mellemrum ignoreres.
+    Dette sikrer, at ekstra mellemrum ignoreres.
     """
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
@@ -87,8 +87,8 @@ def normalize_col(col):
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
-    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key)
-    matcher 'Item no' (efter normalisering).
+    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher 'Item no'
+    (sammenlignet med normaliserede værdier).
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -109,7 +109,7 @@ def process_stock_rts_alternative(mapping_row, stock_df):
       1. Hent 'ProductKey' fra mapping_row.
       2. Filtrer stock_df, så kun rækker med en matchende 'productkey' (efter normalisering) er med.
       3. Filtrer herefter, så kun rækker med en ikke-tom 'rts' er med.
-      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      4. Udtræk unikke værdier fra kolonnen 'variantname' i stock.
       5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
@@ -140,7 +140,7 @@ def process_stock_mto_alternative(mapping_row, stock_df):
       1. Hent 'ProductKey' fra mapping_row.
       2. Filtrer stock_df, så kun rækker med en matchende 'productkey' er med.
       3. Filtrer herefter, så kun rækker med en ikke-tom 'mto' er med.
-      4. Udtræk unikke værdier fra kolonnen 'variantname'.
+      4. Udtræk unikke værdier fra kolonnen 'variantname' i stock.
       5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
     """
     product_key = mapping_row.get("productkey", "")
@@ -269,24 +269,37 @@ def replace_image_placeholders(slide, image_values):
 # --- Main Streamlit App ---
 def main():
     st.title("PowerPoint Generator App")
-    st.write("Upload din brugerfil (Excel) med to kolonner: 'Item no' (første kolonne) og 'Product name' (anden kolonne).")
+    st.write("Upload din brugerfil (Excel) med to kolonner: 'Item no' og 'Product name'.")
     
-    # Upload brugerfil med header (første række bruges som header)
-    uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
-    if uploaded_file is None:
-        st.info("Vent venligst på at uploade brugerfilen.")
-        return
-
-    try:
-        user_df = pd.read_excel(uploaded_file, header=0)
-    except Exception as e:
-        st.error(f"Fejl ved læsning af brugerfil: {e}")
-        return
-
-    # Valider at filen indeholder præcis de to kolonner
-    if set(user_df.columns) != {"Item no", "Product name"}:
-        st.error("Brugerfilen skal indeholde præcis to kolonner med headers 'Item no' og 'Product name'.")
-        return
+    # Vælg inputmetode: Upload eller paste
+    input_method = st.radio("Vælg inputmetode", ("Upload Excel-fil", "Paste varenumre"))
+    
+    if input_method == "Upload Excel-fil":
+        uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
+        if uploaded_file is None:
+            st.info("Vent venligst på at uploade filen.")
+            return
+        try:
+            user_df = pd.read_excel(uploaded_file, header=0)
+        except Exception as e:
+            st.error(f"Fejl ved læsning af brugerfil: {e}")
+            return
+        # Valider at filen indeholder præcis to kolonner
+        if set(user_df.columns) != {"Item no", "Product name"}:
+            st.error("Brugerfilen skal indeholde præcis to kolonner med headers 'Item no' og 'Product name'.")
+            return
+    else:
+        # Hvis brugeren vælger at paste varenumre, forventes de at være semikolonsepareret
+        varenumre_text = st.text_area("Indsæt varenumre (adskilt med semikolon ';')", height=150)
+        if not varenumre_text.strip():
+            st.info("Indsæt venligst varenumre i tekstfeltet.")
+            return
+        # Split og opret en DataFrame med to kolonner (Item no og en tom Product name)
+        varenumre = [num.strip() for num in varenumre_text.split(";") if num.strip()]
+        if not varenumre:
+            st.error("Ingen gyldige varenumre fundet. Sørg for at de er adskilt med semikolon.")
+            return
+        user_df = pd.DataFrame({"Item no": varenumre, "Product name": [""] * len(varenumre)})
 
     st.write("Brugerfil indlæst succesfuldt!")
     st.info("Validerer filer...")
@@ -361,7 +374,6 @@ def main():
             value = mapping_row.get(norm_ph, "")
             if pd.isna(value):
                 value = ""
-            # For de tre felter indsættes data på samme linje med et mellemrum
             if ph in ("{{Product code}}", "{{Product name}}", "{{Product country of origin}}"):
                 placeholder_texts[ph] = f"{label} {value}"
             else:
@@ -415,4 +427,3 @@ if __name__ == '__main__':
     if 'generated_ppt' not in st.session_state:
         st.session_state.generated_ppt = None
     main()
-    
