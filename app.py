@@ -8,13 +8,13 @@ import requests
 from PIL import Image
 from copy import deepcopy
 
-# Filstier – juster efter behov (fx "data/mapping-file.xlsx" osv.)
+# --- Filstier (tilpas efter behov) ---
 MAPPING_FILE_PATH = "mapping-file.xlsx"
 STOCK_FILE_PATH = "stock.xlsx"
 TEMPLATE_FILE_PATH = "template-generator.pptx"
 
 # --- Forventede kolonner ---
-# Mapping-filens kolonner (bruges som originale navne; vi normaliserer efterfølgende)
+# Mapping-filens originale kolonnenavne (vi normaliserer senere)
 REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product name}}",
     "{{Product code}}",
@@ -34,10 +34,10 @@ REQUIRED_MAPPING_COLS_ORIG = [
     "{{Product Lifestyle2}}",
     "{{Product Lifestyle3}}",
     "{{Product Lifestyle4}}",
-    "ProductKey"  # Mapping-filens ProductKey
+    "ProductKey"  # Mapping-filens ProductKey (uden klammer)
 ]
 
-# Stock-filens kolonner (bruges som originale navne; vi normaliserer efterfølgende)
+# Stock-filens originale kolonnenavne
 REQUIRED_STOCK_COLS_ORIG = [
     "productkey",    # kolonne B: ProductKey
     "variantname",   # kolonne D: VariantName
@@ -74,11 +74,9 @@ IMAGE_PLACEHOLDERS_ORIG = [
 ]
 
 # --- Hjælpefunktioner ---
+
 def normalize_text(s):
-    """
-    Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver.
-    Dette sikrer, at eventuelle ekstra mellemrum ignoreres.
-    """
+    """Fjerner alle mellemrum (inklusiv ikke-brydende) og konverterer til små bogstaver."""
     return re.sub(r"\s+", "", str(s).replace("\u00A0", " ")).lower()
 
 def normalize_col(col):
@@ -87,8 +85,8 @@ def normalize_col(col):
 
 def find_mapping_row(item_no, mapping_df, mapping_prod_key):
     """
-    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key)
-    matcher 'Item no' (efter normalisering).
+    Finder den række i mapping_df, hvor kolonnen for produktkode (mapping_prod_key) matcher 'Item no'.
+    Sammenligningen foretages ved at normalisere begge værdier.
     """
     norm_item = normalize_text(item_no)
     for idx, row in mapping_df.iterrows():
@@ -106,12 +104,12 @@ def find_mapping_row(item_no, mapping_df, mapping_prod_key):
 def process_stock_rts_alternative(mapping_row, stock_df):
     """
     Logik for {{Product RTS}}:
-      1. Hent ProductKey fra mapping_row (fra kolonnen "ProductKey").
-      2. Filtrer stock_df, så kun rækker, hvor stock['productkey'] matcher (efter normalisering),
-         er med.
-      3. Filtrer herefter, så kun rækker hvor kolonnen "rts" IKKE er tom, medtages.
-      4. Udtræk de unikke værdier fra kolonnen "variantname" (stock).
-      5. Sammenkæd de unikke værdier med linjeskift og returnér resultatet.
+      1. Hent 'ProductKey' fra mapping_row.
+      2. Filtrer stock_df, så kun rækker, hvor 'productkey' matcher mapping_row's ProductKey, er med.
+      3. Filtrer herefter, så kun rækker, hvor kolonnen 'rts' IKKE er tom, medtages.
+      4. Udtræk de unikke værdier fra kolonnen 'variantname' i stock, fjern dubletter,
+         og sammenkæd dem med ", " (komma og mellemrum).
+      5. Returnér den sammenkædte streng.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -133,17 +131,17 @@ def process_stock_rts_alternative(mapping_row, stock_df):
         st.error(f"KeyError i process_stock_rts_alternative (variantname): {e}")
         return ""
     unique_variant_names = list(dict.fromkeys(variant_names))
-    return "\n".join(unique_variant_names)
+    return ", ".join(unique_variant_names)
 
 def process_stock_mto_alternative(mapping_row, stock_df):
     """
     Logik for {{Product MTO}}:
-      1. Hent ProductKey fra mapping_row (fra kolonnen "ProductKey").
-      2. Filtrer stock_df, så kun rækker, hvor stock['productkey'] matcher (efter normalisering),
-         er med.
-      3. Filtrer herefter, så kun rækker hvor kolonnen "mto" IKKE er tom, medtages.
-      4. Udtræk de unikke værdier fra kolonnen "variantname" (stock).
-      5. Sammenkæd de unikke værdier med ", " og returnér resultatet.
+      1. Hent 'ProductKey' fra mapping_row.
+      2. Filtrer stock_df, så kun rækker, hvor 'productkey' matcher mapping_row's ProductKey, er med.
+      3. Filtrer herefter, så kun rækker, hvor kolonnen 'mto' IKKE er tom, medtages.
+      4. Udtræk de unikke værdier fra kolonnen 'variantname' i stock, fjern dubletter,
+         og sammenkæd dem med ", " (komma og mellemrum).
+      5. Returnér den sammenkædte streng.
     """
     product_key = mapping_row.get("productkey", "")
     if not product_key or pd.isna(product_key):
@@ -171,7 +169,8 @@ def fetch_and_process_image(url, quality=70, max_size=(1200, 1200)):
     """
     Henter billede fra en URL. Hvis billedet er i TIFF-format eller har gennemsigtighed (RGBA/LA),
     konverteres det til RGB. Billedet komprimeres ved at sætte en lavere JPEG-kvalitet og begrænse størrelsen.
-    Returnerer et BytesIO-objekt med billedet.
+    Timeout er øget til 30 sekunder.
+    Returnerer et BytesIO-objekt med billedet, eller None hvis hentning fejler.
     """
     try:
         response = requests.get(url, timeout=30)
@@ -270,6 +269,15 @@ def main():
     st.title("PowerPoint Generator App")
     st.write("Upload din brugerfil (Excel) med kolonnerne 'Item no' og 'Product name'")
     
+    # Hvis vi allerede har genereret PPT, så brug session_state
+    if "ppt_generated" in st.session_state and st.session_state.ppt_generated:
+        st.success("PowerPoint genereret succesfuldt!")
+        st.download_button("Download PowerPoint", st.session_state.generated_ppt,
+                           file_name="generated_presentation.pptx",
+                           mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        st.progress(100)
+        return
+
     # Upload brugerfil med header (første række bruges som header)
     uploaded_file = st.file_uploader("Upload din bruger Excel-fil", type=["xlsx"])
     if uploaded_file is None:
@@ -367,7 +375,6 @@ def main():
                 placeholder_texts[ph] = f"{label}\n{value}"
 
         product_code = mapping_row.get(MAPPING_PRODUCT_CODE_KEY, "")
-        # Brug den alternative logik til {{Product RTS}} og {{Product MTO}}:
         rts_text = process_stock_rts_alternative(mapping_row, stock_df)
         mto_text = process_stock_mto_alternative(mapping_row, stock_df)
         placeholder_texts["{{Product RTS}}"] = f"Product in stock versions:\n{rts_text}"
@@ -408,6 +415,12 @@ def main():
     st.download_button("Download PowerPoint", ppt_io,
                        file_name="generated_presentation.pptx",
                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    
+    # Gem den genererede PPT i session_state, så progress baren forbliver komplet
+    st.session_state.ppt_generated = True
+    st.session_state.generated_ppt = ppt_io
 
 if __name__ == '__main__':
+    if 'ppt_generated' not in st.session_state:
+        st.session_state.ppt_generated = False
     main()
