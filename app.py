@@ -242,6 +242,7 @@ def replace_text_in_shape(shape, placeholder_values):
     for paragraph in shape.text_frame.paragraphs:
         # Combine runs to find placeholders that might span across them
         full_text = "".join(run.text for run in paragraph.runs)
+        
         if not any(ph in full_text for ph in placeholder_values):
             continue
 
@@ -252,23 +253,18 @@ def replace_text_in_shape(shape, placeholder_values):
             replacement_str = str(replacement) if replacement is not None else ""
             new_text = new_text.replace(placeholder, replacement_str)
 
-        # Clear old runs and add a new one with the updated text
+        # To preserve formatting, set the text of the first run
+        # and remove all subsequent runs.
         if paragraph.runs:
-            # Preserve formatting from the first run
-            first_run = paragraph.runs[0]
-            p = paragraph._p
-            p.clear_content() # Removes all <a:r> child elements
+            # Set the text of the first run to the new full text
+            run = paragraph.runs[0]
+            run.text = new_text
             
-            new_run = p.add_r()
-            new_run.text = new_text
-            # Copy font properties from the original first run
-            if first_run.font:
-                new_run.font.bold = first_run.font.bold
-                new_run.font.italic = first_run.font.italic
-                new_run.font.name = first_run.font.name
-                new_run.font.size = first_run.font.size
-                if first_run.font.color.type is not None:
-                    new_run.font.color.rgb = first_run.font.color.rgb
+            # Remove all other runs from the paragraph
+            # We iterate backwards because we are modifying the list as we go
+            p = paragraph._p
+            for i in range(len(paragraph.runs) - 1, 0, -1):
+                p.remove(paragraph.runs[i]._r)
 
 
 def replace_hyperlink_placeholders(slide, hyperlink_values):
